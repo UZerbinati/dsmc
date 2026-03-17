@@ -2,17 +2,41 @@
 import petsc4py
 import numpy as np
 import sys
+import os
 #passing system argument to PETSc
 petsc4py.init(sys.argv)
 from petsc4py import PETSc
 from mpi4py import MPI
+import gc
 import matplotlib.pyplot as plt
+from numba import jit
 
 
 def Print(*args, **kwargs):
     """Helper to print only from rank 0."""
     if PETSc.COMM_WORLD.Get_rank() == 0:
         print(*args, **kwargs)
+
+def _build_cell_lists(cells):
+
+    if cells.size == 0:
+        return {}
+
+    order = np.argsort(cells)
+    cells_sorted = cells[order]
+
+    # starts of each new cell block
+    starts = np.flatnonzero(
+        np.r_[True, cells_sorted[1:] != cells_sorted[:-1]]
+    )
+    ends = np.r_[starts[1:], len(cells_sorted)]
+
+    cell_lists = {}
+    for a, b in zip(starts, ends):
+        c = int(cells_sorted[a])
+        cell_lists[c] = order[a:b]
+
+    return cell_lists
 
 class MaxwellDSMC:
     """
@@ -53,7 +77,6 @@ class MaxwellDSMC:
         self.nlocal = nlocal
         self.N = self.nlocal * self.size
         self.nu = nu              # collision frequency
-        self.nu=1/dt
         self.dt = dt
         self.temperature = temperature
         self.mass = mass
@@ -77,6 +100,10 @@ class MaxwellDSMC:
             "momentum_1": [],
             "momentum_2": [],
         }
+
+        self.output_path = f'output_boltzmann_{self.collision_type}' 
+        if not os.path.exists(self.output_path):
+            os.makedirs(self.output_path)
 
         self.dm = self._create_mesh()
         self.mesh_dim = self.dm.getDimension()
@@ -214,27 +241,29 @@ class MaxwellDSMC:
             self.swarm.restoreField("velocity")
 
     def _sample_angle(self, m: int):
-        if self.grazing_collision:
-            Theta = self.rng.uniform(size=(m, 1)) * 2 * np.pi
-        else:
-            Theta = (1/self.nu)*self.rng.uniform(size=(m, 1)) * 2 * np.pi
+        Theta = self.rng.uniform(size=(m, 1)) * 2 * np.pi
         return Theta
-    
+
+    def _get_particle_cells(self):
+        celldm = self.swarm.getCellDMActive()
+        cellid_name = celldm.getCellID()
+
+        arr = self.swarm.getField(cellid_name)
+        try:
+            out = np.asarray(arr).copy()
+            return out.reshape(-1).astype(np.int32)
+        finally:
+             self.swarm.restoreField(cellid_name)
+
     def bgk_collision_step(self):
-        """
-        One BGK collision step: relax towards local Maxwellian.
-        """
-        self.swarm.sortGetAccess()
-        ncells, _ = self.swarm.sortGetSizes()
+        cells = self._get_particle_cells()
+        cell_lists = _build_cell_lists(cells)
         vel = self.swarm.getField("velocity")
-        V = vel.reshape(self.nlocal, self.dim)
-        #import pdb; pdb.set_trace()
-        for e in range(ncells):
-            plist = self.swarm.sortGetPointsPerCell(e)
+        for cell, plist in cell_lists.items():
             count = len(plist)
             gaussian = self.rng.normal(size=(count, self.dim))
-            v_exact = np.sum(V[plist], axis=0)/count
-            e_exact = np.sum(V[plist]**2, axis=0)/count
+            v_exact = np.sum(vel[plist], axis=0)/count
+            e_exact = np.sum(vel[plist]**2, axis=0)/count
 
             #Smoothing
             v_prime = np.sum(gaussian, axis=0)/count
@@ -250,36 +279,24 @@ class MaxwellDSMC:
             gaussian = (gaussian - lam)/tau
             if count == 0:
                 continue
-            V[plist, :] = gaussian 
+            vel[plist, :] = gaussian 
         self.swarm.restoreField("velocity")
-        self.swarm.sortRestoreAccess()
 
     def nanbu_collision_step(self):
-        """
-        One homogeneous DSMC collision step.
-
-        Expected number of binary collisions per rank:
-            M ~ 0.5 * nu * N_local * dt
-
-        For Maxwell molecules this is consistent with uniform pair selection,
-        because the kernel is independent of relative speed magnitude.
-        """
-        self.swarm.sortGetAccess()
-        ncells, _ = self.swarm.sortGetSizes()
+        cells = self._get_particle_cells()
+        cell_lists = _build_cell_lists(self._get_particle_cells())
         vel = self.swarm.getField("velocity")
-        V = vel.reshape(self.nlocal, self.dim)
-        for e in range(ncells):
-            plist = self.swarm.sortGetPointsPerCell(e)
+        for cell, plist in cell_lists.items():
             number_points = len(plist)
             if number_points < 2:
-                continue
+                pass
             else:
                 # Number of collision trials on this rank
                 Mcol = int(0.5 * self.nu * number_points * self.dt)
                 Mcol = Mcol if Mcol%2 == 0 else Mcol - 1  # ensure even number for pairing
                 if Mcol == 0:
-                    return
-                if 2*Mcol > self.nlocal:
+                    continue
+                if 2*Mcol > number_points:
                     Mcol = Mcol - 2
 
                 # Random particle pairs (allowing repeated use within a timestep)
@@ -287,8 +304,8 @@ class MaxwellDSMC:
                 i = rnd_pairs[:Mcol]
                 j = rnd_pairs[Mcol:2*Mcol]
                 
-                vi = V[i].copy()
-                vj = V[j].copy()
+                vi = vel[i].copy()
+                vj = vel[j].copy()
 
                 g = vi - vj
                 G = 0.5 * (vi + vj)
@@ -300,12 +317,14 @@ class MaxwellDSMC:
                 # post-collisional relative velocity has same magnitude, random direction
                 g_norm = np.linalg.norm(g, axis=1)
 
-                V[i, 0] = G[:, 0] + 0.5 * g_norm * np.cos(sigma)[:, 0]
-                V[i, 1] = G[:, 1] + 0.5 * g_norm * np.sin(sigma)[:, 0]
-                V[j, 0] = G[:, 0] - 0.5 * g_norm * np.cos(sigma)[:, 0]
-                V[j, 1] = G[:, 1] - 0.5 * g_norm * np.sin(sigma)[:, 0]
+                vel[i, 0] = G[:, 0] + 0.5 * g_norm * np.cos(sigma)[:, 0]
+                vel[i, 1] = G[:, 1] + 0.5 * g_norm * np.sin(sigma)[:, 0]
+                vel[j, 0] = G[:, 0] - 0.5 * g_norm * np.cos(sigma)[:, 0]
+                vel[j, 1] = G[:, 1] - 0.5 * g_norm * np.sin(sigma)[:, 0]
+                del vi, vj, rnd_pairs, i, j, g, G, g_norm, Mcol, sigma
+            del plist, number_points
         self.swarm.restoreField("velocity")
-        self.swarm.sortRestoreAccess()
+        del vel
 
     def _reflect_1d(self, x, v, xmin, xmax):
         """
@@ -409,8 +428,7 @@ class MaxwellDSMC:
         fig.tight_layout()
         fig.savefig(f"{prefix}_temperature_x.png", dpi=200, bbox_inches="tight")
         plt.close(fig)
-
-
+        del fig, ax
 
     def run(self, nsteps: int, monitor_every: int = 10):
         if self.rank == 0:
@@ -424,11 +442,11 @@ class MaxwellDSMC:
             )
         self._construct_grid()
         if self.rank == 0:
-            self.plot_observables(prefix=f"output/dsmc_0_")
-            self.plot_velocity_histograms(prefix=f"output/dsmc_0_")
+            self.plot_observables(prefix=f"{self.output_path}/dsmc_0_")
+            self.plot_velocity_histograms(prefix=f"{self.output_path}/dsmc_0_")
         for step in range(1, nsteps + 1):
             self.transport_step(dt=0.5*self.dt)
-            for _ in range(self.extra_collision):
+            for coll_index in range(self.extra_collision):
                 if self.collision_type == "nanbu":
                     self.nanbu_collision_step()
                 elif self.collision_type == "bgk":
@@ -436,18 +454,19 @@ class MaxwellDSMC:
                 else:
                     raise ValueError(f"Unknown collision type: {self.collision_type}")
             self.transport_step(dt=0.5*self.dt)
-            if step % monitor_every == 0 or step == nsteps:
-                d = self.diagnostics(step=step)
-                if self.rank == 0:
-                    print(
-                        f"[step {step}] N={d['N']}, t ={step*self.dt:.6f} "
-                        f"T={d['temperature']:.6e} "
-                        f"|u_x|={np.linalg.norm(d['momentum_1']):.6e} "
-                        f"|u|={np.linalg.norm(d['mean_u']):.6e} "
-                        f"E={d['energy']:.6e}"
-                    )
-                    self.plot_observables(prefix=f"output/dsmc_{step}_")
-                    self.plot_velocity_histograms(prefix=f"output/dsmc_{step}_")
+            d = self.diagnostics(step=step)
+            if self.rank == 0:
+                print(
+                    f"[step {step}] N={d['N']}, t ={step*self.dt:.6f} "
+                    f"T={d['temperature']:.6e} "
+                    f"|u_x|={np.linalg.norm(d['momentum_1']):.6e} "
+                    f"|u|={np.linalg.norm(d['mean_u']):.6e} "
+                    f"E={d['energy']:.6e}"
+                )
+                if step % monitor_every == 0 or step == nsteps:
+                    self.plot_observables(prefix=f"{self.output_path}/dsmc_{step}")
+                    self.plot_velocity_histograms(prefix=f"{self.output_path}/dsmc_{step}")
+            gc.collect()
                 
 
 
