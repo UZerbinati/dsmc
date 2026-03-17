@@ -33,6 +33,9 @@ class MaxwellDSMC:
         dt: float = 1e-2,
         temperature: float = 1.0,
         mass: float = 1.0,
+        extra_collision: int = 1,
+        grazing_collision: bool = False,
+        collision_type: str = "nanbu",
         seed: int = 1234,
         bins: int = 31,
         test: str = "sod",
@@ -43,6 +46,10 @@ class MaxwellDSMC:
         self.size = comm.Get_size()
 
         self.dim = 2
+        if test == "sod":
+            self.effective_dim = 1
+        else:
+            self.effective_dim = self.dim
         self.nlocal = nlocal
         self.N = self.nlocal * self.size
         self.nu = nu              # collision frequency
@@ -52,6 +59,9 @@ class MaxwellDSMC:
         self.mass = mass
         self.bins = bins
         self.test = test
+        self.extra_collision = extra_collision
+        self.grazing_collision = grazing_collision
+        self.collision_type = collision_type
 
 
         self.xlim = 10.0
@@ -110,35 +120,53 @@ class MaxwellDSMC:
         sigma = np.sqrt(0.5*self.temperature / self.mass)
         if self.test == "sod":
             self.info["norm_rho"] = 0.5*(1+0.125)
-            vel = self.swarm.getField("velocity")
-            wgt = self.swarm.getField("weight")
             X = np.zeros((self.nlocal, self.mesh_dim))
-            V = vel.reshape(self.nlocal, self.dim)
-            W = wgt.reshape(self.nlocal)
             n_left = int(0.89*self.nlocal)
             n_right = self.nlocal - n_left
             X[:n_left, 0] = self.rng.uniform(0.0, 0.5*self.info["Lx"], size=n_left)
             X[n_left:, 0] = self.rng.uniform(0.5, 1*self.info["Lx"], size=n_right)
             X[:,0] = np.sort(X[:,0]) 
             X[:,1] = 0.5
-            counts, bins = np.histogram(X[:,0], bins=self.bins)
-            # anisotropic Gaussian
+            self.swarm.setPointCoordinates(X)
+            self.swarm.migrate(remove_sent_points=False)
+
+            celldm = self.swarm.getCellDMActive()
+            cellid_name = celldm.getCellID()
+            cellid = self.swarm.getField(cellid_name)
+            vel = self.swarm.getField("velocity")
+            wgt = self.swarm.getField("weight")
+            counts = np.bincount(cellid[:,0])
+            # isotropic Gaussian
             tmp_index = 0
             for i in range(self.bins):
                 count = counts[i]
+                gaussian = self.rng.normal(size=(count, self.dim))
+                v_prime = np.sum(gaussian, axis=0)/count
+                #Smoothing
+                v_exact = 0; e_exact = 1
+                v_prime = np.sum(gaussian, axis=0)/count
+                e_prime = np.sum(gaussian**2, axis=0)/count
+                tau = np.sqrt((e_prime-v_prime**2)/(e_exact-v_exact**2))
+                lam = v_prime - tau* v_exact
+                gaussian = (gaussian - lam)/tau
+                #Smoothing twice for better results
+                v_prime = np.sum(gaussian, axis=0)/count
+                e_prime = np.sum(gaussian**2, axis=0)/count
+                tau = np.sqrt((e_prime-v_prime**2)/(e_exact-v_exact**2))
+                lam = v_prime - tau* v_exact
+                gaussian = (gaussian - lam)/tau
                 if count == 0:
                     continue
                 if i > self.bins//2:
-                    V[tmp_index:tmp_index+count, :] = self.rng.normal(size=(count, self.dim))* np.sqrt(0.8)*sigma
+                    vel[tmp_index:tmp_index+count, :] = gaussian * np.sqrt(0.8) * sigma
                 else:
-                    V[tmp_index:tmp_index+count, :] = self.rng.normal(size=(count, self.dim)) * sigma
+                    vel[tmp_index:tmp_index+count, :] = gaussian * sigma
                 tmp_index += count
 
-            W[:] = 1.0
+            wgt[:] = 1.0
+            self.swarm.restoreField(cellid_name)
             self.swarm.restoreField("velocity")
             self.swarm.restoreField("weight")
-            self.swarm.setPointCoordinates(X)
-            self.swarm.migrate(remove_sent_points=True)
 
         #Change value for graphs
         self.xlim = 8.0
@@ -180,15 +208,53 @@ class MaxwellDSMC:
                 "mean_u": mean_u,
                 "energy": global_energy,
                 "temperature": temp,
+                "momentum_1": mean_u[0],
             }
         finally:
             self.swarm.restoreField("velocity")
 
     def _sample_angle(self, m: int):
-        Theta = self.rng.uniform(size=(m, 1)) * 2 * np.pi
+        if self.grazing_collision:
+            Theta = self.rng.uniform(size=(m, 1)) * 2 * np.pi
+        else:
+            Theta = (1/self.nu)*self.rng.uniform(size=(m, 1)) * 2 * np.pi
         return Theta
+    
+    def bgk_collision_step(self):
+        """
+        One BGK collision step: relax towards local Maxwellian.
+        """
+        self.swarm.sortGetAccess()
+        ncells, _ = self.swarm.sortGetSizes()
+        vel = self.swarm.getField("velocity")
+        V = vel.reshape(self.nlocal, self.dim)
+        #import pdb; pdb.set_trace()
+        for e in range(ncells):
+            plist = self.swarm.sortGetPointsPerCell(e)
+            count = len(plist)
+            gaussian = self.rng.normal(size=(count, self.dim))
+            v_exact = np.sum(V[plist], axis=0)/count
+            e_exact = np.sum(V[plist]**2, axis=0)/count
 
-    def collision_step(self):
+            #Smoothing
+            v_prime = np.sum(gaussian, axis=0)/count
+            e_prime = np.sum(gaussian**2, axis=0)/count
+            tau = np.sqrt((e_prime-v_prime**2)/(e_exact-v_exact**2))
+            lam = v_prime - tau* v_exact
+            gaussian = (gaussian - lam)/tau
+            #Smoothing twice for better results
+            v_prime = np.sum(gaussian, axis=0)/count
+            e_prime = np.sum(gaussian**2, axis=0)/count
+            tau = np.sqrt((e_prime-v_prime**2)/(e_exact-v_exact**2))
+            lam = v_prime - tau* v_exact
+            gaussian = (gaussian - lam)/tau
+            if count == 0:
+                continue
+            V[plist, :] = gaussian 
+        self.swarm.restoreField("velocity")
+        self.swarm.sortRestoreAccess()
+
+    def nanbu_collision_step(self):
         """
         One homogeneous DSMC collision step.
 
@@ -198,14 +264,14 @@ class MaxwellDSMC:
         For Maxwell molecules this is consistent with uniform pair selection,
         because the kernel is independent of relative speed magnitude.
         """
+        self.swarm.sortGetAccess()
         ncells, _ = self.swarm.sortGetSizes()
         vel = self.swarm.getField("velocity")
         V = vel.reshape(self.nlocal, self.dim)
-        for cell_id in range(ncells):
+        for e in range(ncells):
             plist = self.swarm.sortGetPointsPerCell(e)
             number_points = len(plist)
-            V = V[plist]
-            if m < 2:
+            if number_points < 2:
                 continue
             else:
                 # Number of collision trials on this rank
@@ -241,7 +307,23 @@ class MaxwellDSMC:
         self.swarm.restoreField("velocity")
         self.swarm.sortRestoreAccess()
 
+    def _reflect_1d(self, x, v, xmin, xmax):
+        """
+        Reflect positions/velocities on [xmin, xmax].
+
+        Works even if a particle crosses a wall more than once in one timestep.
+        x, v are 1D numpy arrays (views).
+        """
+        L = xmax - xmin
+        I_left = np.where(x < xmin)
+        I_right = np.where(x > xmax)
+        x[I_left] = -np.abs(x[I_left])*np.sign(v[I_left])
+        x[I_right] = L - np.abs(x[I_right]-xmax)*np.sign(v[I_right])
+        v[I_left] = -v[I_left]
+        v[I_right] = -v[I_right]
+
     def transport_step(self, dt):
+        self.swarm.sortGetAccess()
         celldm = self.swarm.getCellDMActive()
         coord_names = celldm.getCoordinateFields()
         pos = self.swarm.getField(coord_names[0])
@@ -249,12 +331,38 @@ class MaxwellDSMC:
         X = pos.reshape(self.nlocal, self.mesh_dim)
         V = vel.reshape(self.nlocal, self.dim)
 
-        for d in range(self.mesh_dim):
+        for d in range(self.effective_dim):
             X[:, d] += V[:, d] * dt
+        self._reflect_1d(X[:, 0], V[:, 0], 0.0, self.info["Lx"])
 
         self.swarm.restoreField(coord_names[0])
         self.swarm.restoreField("velocity")
         self.swarm.migrate(remove_sent_points=False)
+        self.swarm.sortRestoreAccess()
+
+    def plot_velocity_histograms(self, prefix=""):
+        vel = self.swarm.getField("velocity")
+        try:
+            Vlocal = vel.reshape(self.nlocal, self.dim).copy()
+        finally:
+            self.swarm.restoreField("velocity")
+
+        gathered = self.comm.gather(Vlocal, root=0)
+        if self.rank != 0:
+            return
+
+        V = np.vstack(gathered)
+
+        fig, ax = plt.subplots(figsize=(7, 4))
+        H, xedges, yedges = np.histogram2d(V[:,0], V[:,1], bins=(self.grid_x, self.grid_y))
+
+        H = H.T
+        plt.imshow(H, interpolation='nearest', origin='lower', extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]])
+        ax.set_xlim(-self.xlim, self.xlim)
+        ax.set_ylim(-self.ylim, self.ylim)
+        fig.savefig(f"{prefix}_vel.png", dpi=200, bbox_inches="tight")
+        plt.close(fig)
+
 
     
     def plot_observables(self, prefix=""):
@@ -263,17 +371,17 @@ class MaxwellDSMC:
         coord_names = celldm.getCoordinateFields()
         cellid = self.swarm.getField(cellid_name)
         X = self.swarm.getField(coord_names[0])
+        vel = self.swarm.getField("velocity")
+
         counts, bins = np.histogram(X[:,0], bins=self.bins)
         rho_x = (counts / self.N)*(self.bins/self.info["Lx"])*self.info["norm_rho"]
-        vel = self.swarm.getField("velocity")
-        V = vel.reshape(self.nlocal, self.dim)
-        vel_x = np.bincount(cellid[:,0], weights=V[:,0]) / counts
-        T = self.mass*(V[:,0]**2 + V[:,1]**2) 
+        vel_x = np.bincount(cellid[:,0], weights=vel[:,0]) / counts
+        T = self.mass*(vel[:,0]**2 + vel[:,1]**2) 
         temp_x = np.bincount(cellid[:,0], weights=T) / counts - self.mass*vel_x**2
+        
         self.swarm.restoreField(cellid_name)
         self.swarm.restoreField(coord_names[0])
         self.swarm.restoreField("velocity")
-        self.swarm.sortRestoreAccess()
 
         fig, ax = plt.subplots(figsize=(7, 4))
         plt.plot(self.edges_x[:-1], rho_x)
@@ -308,27 +416,38 @@ class MaxwellDSMC:
         if self.rank == 0:
             d = self.diagnostics()
             print(
-                f"[step 0] N={d['N']} "
+                f"[step 0] N={d['N']}, t = 0.0 "
                 f"T={d['temperature']:.6e} "
+                f"|u_x|={np.linalg.norm(d['momentum_1']):.6e} "
                 f"|u|={np.linalg.norm(d['mean_u']):.6e} "
                 f"E={d['energy']:.6e}"
             )
         self._construct_grid()
-        self.plot_observables(prefix=f"output/dsmc_0_")
+        if self.rank == 0:
+            self.plot_observables(prefix=f"output/dsmc_0_")
+            self.plot_velocity_histograms(prefix=f"output/dsmc_0_")
         for step in range(1, nsteps + 1):
             self.transport_step(dt=0.5*self.dt)
-            self.collision_step()
+            for _ in range(self.extra_collision):
+                if self.collision_type == "nanbu":
+                    self.nanbu_collision_step()
+                elif self.collision_type == "bgk":
+                    self.bgk_collision_step()
+                else:
+                    raise ValueError(f"Unknown collision type: {self.collision_type}")
             self.transport_step(dt=0.5*self.dt)
             if step % monitor_every == 0 or step == nsteps:
                 d = self.diagnostics(step=step)
                 if self.rank == 0:
                     print(
-                        f"[step {step}] N={d['N']} "
+                        f"[step {step}] N={d['N']}, t ={step*self.dt:.6f} "
                         f"T={d['temperature']:.6e} "
+                        f"|u_x|={np.linalg.norm(d['momentum_1']):.6e} "
                         f"|u|={np.linalg.norm(d['mean_u']):.6e} "
                         f"E={d['energy']:.6e}"
                     )
-            self.plot_observables(prefix=f"output/dsmc_{step}_")
+                    self.plot_observables(prefix=f"output/dsmc_{step}_")
+                    self.plot_velocity_histograms(prefix=f"output/dsmc_{step}_")
                 
 
 
@@ -336,7 +455,8 @@ def main():
     Opt = PETSc.Options()
     Print("Running homogeneous Maxwell DSMC with options:")
 
-    nlocal = Opt.getInt("nlocal", 20000)
+    nlocal = Opt.getReal("nlocal", 20000)
+    nlocal = int(nlocal)
     nu = Opt.getReal("nu", 1.0)
     bins = Opt.getInt("bins", 31)
     dt = Opt.getReal("dt", 1e-2)
@@ -344,17 +464,24 @@ def main():
     temp = Opt.getReal("temperature", 1.0)
     mass = Opt.getReal("mass", 1.0)
     seed = Opt.getInt("seed", 1234)
+    grazing_collision = Opt.getBool("grazing_collision", False)
+    collision_type = Opt.getString("collision_type", "nanbu")
+    extra_collision = Opt.getInt("extra_collision", 0)+1
     monitor_every = Opt.getInt("monitor_every", 10)
 
     Print(f"  nlocal={nlocal}")
     Print(f"  nu={nu}")
     Print(f"  dt={dt}")
+    Print(f"  collision ratio is {nu*dt}")
     Print(f"  bins={bins}")
     Print(f"  nsteps={nsteps}")
     Print(f"  temperature={temp}")
     Print(f"  mass={mass}")
     Print(f"  seed={seed}")
     Print(f"  monitor_every={monitor_every}")
+    Print(f"  extra_collision={extra_collision}")
+    Print(f"  collision_type={collision_type}")
+    Print(f"  grazing_collision={grazing_collision}")
 
     Print("--------------------------------------------------------------------")
 
@@ -365,6 +492,9 @@ def main():
         bins = bins,
         temperature=temp,
         mass=mass,
+        extra_collision=extra_collision,
+        grazing_collision=grazing_collision,
+        collision_type=collision_type,
         seed=seed,
         comm=MPI.COMM_WORLD,
     )
