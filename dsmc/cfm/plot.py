@@ -273,6 +273,11 @@ def plot_histograms(self, prefix=""):
     # Labels (no title in SIAM)
     ax.set_xlabel(r"$\theta$")
     ax.set_ylabel(r"$f(\theta)$")
+    m = np.mean(H_theta)
+    ymin = min(H_theta.min(), m - 0.1)
+    ymax = max(H_theta.max(), m + 0.1)
+    margin = 0.02 * (ymax - ymin)
+    ax.set_ylim(ymin - margin, ymax + margin)
     # Spines: keep all, but thin and clean (SIAM style often keeps box)
     for spine in ax.spines.values():
         spine.set_linewidth(0.8)
