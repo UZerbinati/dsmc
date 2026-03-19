@@ -1,8 +1,5 @@
 """
-Test with with Vlasov force
-----------------------------
-Here we consdier a quadratic potential reuslting in the Valsov force
-V = -alpha(theta-theta_av)
+Test with no Vlasov force
 """
 import sys
 import petsc4py
@@ -48,7 +45,6 @@ info = {"inertia": 1.0,
         "om": 1.0,       # rotational restitution
         "cutoff": 0.1,   # angular cutoff
        }
-vlasov_force = lambda theta, theta_av: -(theta-theta_av)
 sim = CFMDSMC(
     nlocal=nlocal,
     nu=nu,
@@ -58,10 +54,9 @@ sim = CFMDSMC(
     extra_collision=extra_collision,
     grazing_collision=grazing_collision,
     collision_type=collision_type,
-    vlasov_force = vlasov_force,
     seed=seed,
     test="uniform_angle",
-    prefix="test_2",
+    prefix="test_0",
     comm=MPI.COMM_WORLD,
 )
 sim.run(nsteps=nsteps, monitor_every=monitor_every)

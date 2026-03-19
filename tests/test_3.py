@@ -10,18 +10,17 @@ petsc4py.init(sys.argv)
 from petsc4py import PETSc
 from mpi4py import MPI
 from dsmc import CFMDSMC, Print
-import numpy as np
 
 Opt = PETSc.Options()
 Print("Running homogeneous CFM DSMC with options:")
 
-nlocal = Opt.getReal("nlocal", 20000)
+nlocal = Opt.getReal("nlocal", 1e7)
 nlocal = int(nlocal)
-bins = Opt.getInt("bins", 31)
-dt = Opt.getReal("dt", 1e-2)
-nu = Opt.getReal("nu", 1/dt)
-nsteps = Opt.getInt("nsteps", 200)
-seed = Opt.getInt("seed", 1234)
+bins = Opt.getInt("bins", 256)
+dt = Opt.getReal("dt", 0.01)
+nu = Opt.getReal("nu", 10)
+nsteps = Opt.getInt("nsteps", 2000)
+seed = Opt.getInt("seed", 47)
 grazing_collision = Opt.getBool("grazing_collision", False)
 collision_type = Opt.getString("collision_type", "nanbu")
 extra_collision = Opt.getInt("extra_collision", 0)+1
@@ -49,7 +48,7 @@ info = {"inertia": 1.0,
         "om": 1.0,       # rotational restitution
         "cutoff": 0.1,   # angular cutoff
        }
-vlasov_force = lambda theta, theta_av: -np.sin(theta-theta_av)
+vlasov_force = lambda theta, theta_av: -4*(theta-theta_av)
 sim = CFMDSMC(
     nlocal=nlocal,
     nu=nu,

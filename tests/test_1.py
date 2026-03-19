@@ -11,13 +11,13 @@ from dsmc import CFMDSMC, Print
 Opt = PETSc.Options()
 Print("Running homogeneous CFM DSMC with options:")
 
-nlocal = Opt.getReal("nlocal", 20000)
+nlocal = Opt.getReal("nlocal", 1e7)
 nlocal = int(nlocal)
-bins = Opt.getInt("bins", 31)
-dt = Opt.getReal("dt", 1e-2)
-nu = Opt.getReal("nu", 1/dt)
-nsteps = Opt.getInt("nsteps", 200)
-seed = Opt.getInt("seed", 1234)
+bins = Opt.getInt("bins", 256)
+dt = Opt.getReal("dt", 0.01)
+nu = Opt.getReal("nu", 10)
+nsteps = Opt.getInt("nsteps", 2000)
+seed = Opt.getInt("seed", 47)
 grazing_collision = Opt.getBool("grazing_collision", False)
 collision_type = Opt.getString("collision_type", "nanbu")
 extra_collision = Opt.getInt("extra_collision", 0)+1
@@ -55,6 +55,7 @@ sim = CFMDSMC(
     grazing_collision=grazing_collision,
     collision_type=collision_type,
     seed=seed,
+    test="uniform_angle",
     prefix="test_1",
     comm=MPI.COMM_WORLD,
 )
