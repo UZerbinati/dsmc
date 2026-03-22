@@ -1,11 +1,11 @@
 """
-Sod shock tube test — space-inhomogeneous Boltzmann with Maxwell molecules
----------------------------------------------------------------------------
+Sod shock tube — Nanbu, nu=100 (higher collision frequency than test_0)
+-----------------------------------------------------------------------
 Left state:  rho=1,     T=1.0  (x < 0.5)
 Right state: rho=0.125, T=0.8  (x > 0.5)
 
 Run with:
-    mpirun -n <P> python tests/boltzmann/test_0.py -nlocal 10000 -nsteps 200 \
+    mpirun -n <P> python tests/boltzmann/test_1.py -nlocal 10000 -nsteps 200 \
         -monitor_every 20 -bins 64 -nu 100 -dt 0.001
 """
 import sys
@@ -20,7 +20,7 @@ Print("Running space-inhomogeneous Maxwell-molecule DSMC (Sod shock tube):")
 
 nlocal = Opt.getReal("nlocal", 1e7)
 nlocal = int(nlocal)
-bins = Opt.getInt("bins", 512)
+bins = Opt.getInt("bins", 256)
 dt = Opt.getReal("dt", 0.01)
 nu = Opt.getReal("nu", 100)
 nsteps = Opt.getInt("nsteps", 2000)

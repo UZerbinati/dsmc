@@ -4,11 +4,12 @@ import numpy as np
 def initialize_particles(self):
     if self.test == "sod":
         _initialize_sod(self)
+        self.xlim = 8.0
+        self.ylim = 8.0
+    elif self.test == "cylinder_flow":
+        _initialize_cylinder_flow(self)
     else:
         raise RuntimeError(f"[!] Unknown test: {self.test}")
-
-    self.xlim = 8.0
-    self.ylim = 8.0
 
 
 def _initialize_sod(self):
@@ -93,3 +94,97 @@ def _initialize_sod(self):
     self.swarm.restoreField(coord_names[0])
     self.swarm.restoreField("velocity")
     self.swarm.restoreField("weight")
+
+
+def _initialize_cylinder_flow(self):
+    """
+    Flow past a cylinder initial condition.
+
+    Particles are placed uniformly in [xmin, xmax] x [ymin, ymax] excluding
+    the cylinder interior, using rejection sampling.  Velocities are sampled
+    from a Maxwellian with mean drift u_inf in the x-direction.
+
+    Boundary conditions (applied during transport):
+      - Periodic in x
+      - Specular (elastic) reflection on the cylinder surface
+      - Specular (elastic) reflection on the top/bottom walls
+    """
+    xmin = self.info["xmin"]
+    xmax = self.info["xmax"]
+    ymin = self.info["ymin"]
+    ymax = self.info["ymax"]
+    cx   = self.info.get("cylinder_center_x", 0.0)
+    cy   = self.info.get("cylinder_center_y", 0.0)
+    R    = self.info.get("cylinder_radius",   1.0)
+    u_inf = self.info.get("inflow_velocity",  1.0)
+
+    # --- Determine this rank's spatial subdomain from the DMDA ---
+    # getRanges() returns mesh-point index ranges ((xs, xe), (ys, ye)).
+    # Convention (same as sod): rank owns physical x in
+    #   [edges_x[xs-1], edges_x[xe-1]]  (xs==0 anchors to xmin)
+    (xs, xe), (ys, ye) = self.dm.getRanges()
+    nx = len(self.edges_x) - 1
+    ny = len(self.edges_y) - 1
+
+    x_lo = self.edges_x[xs - 1] if xs > 0 else self.edges_x[0]
+    x_hi = self.edges_x[xe - 1]
+    y_lo = self.edges_y[ys - 1] if ys > 0 else self.edges_y[0]
+    y_hi = self.edges_y[ye - 1]
+
+    # --- Particle count proportional to rank area ---
+    total_area = (xmax - xmin) * (ymax - ymin)
+    rank_area  = (x_hi - x_lo) * (y_hi - y_lo)
+    n_local = max(1, int(round(self.N * rank_area / total_area)))
+
+    self.swarm.setLocalSizes(n_local, self.N)
+    self.nlocal = n_local
+
+    # --- Rejection-sample positions outside the cylinder ---
+    X = np.zeros((n_local, self.mesh_dim))
+    count = 0
+    batch = max(4 * n_local, 1000)
+    while count < n_local:
+        x_trial = self.rng.uniform(x_lo, x_hi, batch)
+        y_trial = self.rng.uniform(y_lo, y_hi, batch)
+        outside = (x_trial - cx) ** 2 + (y_trial - cy) ** 2 >= R ** 2
+        valid_x = x_trial[outside]
+        valid_y = y_trial[outside]
+        take = min(len(valid_x), n_local - count)
+        X[count:count + take, 0] = valid_x[:take]
+        X[count:count + take, 1] = valid_y[:take]
+        count += take
+
+    self.swarm.setPointCoordinates(X)
+    self.nlocal = self.swarm.getLocalSize()
+
+    # --- Assign Maxwellian velocities with drift u_inf in x ---
+    celldm = self.swarm.getCellDMActive()
+    coord_names = celldm.getCoordinateFields()
+    pos = self.swarm.getField(coord_names[0])
+    vel = self.swarm.getField("velocity")
+    wgt = self.swarm.getField("weight")
+
+    n = self.nlocal
+    sigma = np.sqrt(self.temperature / self.mass)
+
+    gaussian = self.rng.normal(size=(n, self.dim))
+    # Smooth to zero mean and unit variance before scaling
+    for _ in range(2):
+        g_mean = gaussian.mean(axis=0)
+        g_std  = gaussian.std(axis=0)
+        gaussian = (gaussian - g_mean) / np.where(g_std > 0, g_std, 1.0)
+
+    V = vel.reshape(n, self.dim)
+    V[:, 0] = gaussian[:, 0] * sigma + u_inf
+    V[:, 1] = gaussian[:, 1] * sigma
+
+    wgt[:] = 1.0
+
+    self.swarm.restoreField(coord_names[0])
+    self.swarm.restoreField("velocity")
+    self.swarm.restoreField("weight")
+
+    # Velocity-space histogram limits: inflow speed + several thermal widths
+    v_max = u_inf + 4.0 * sigma
+    self.xlim = max(v_max, 4.0)
+    self.ylim = max(4.0 * sigma, 4.0)

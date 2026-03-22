@@ -11,11 +11,42 @@ import pickle
 
 class BoltzmannDSMC:
     """
-    DSMC for the space-inhomogeneous Boltzmann equation with Maxwell molecules.
+    DSMC solver for the space-inhomogeneous Boltzmann equation with Maxwell
+    molecules.
 
-    Particles carry velocity v in R^2 and move in a 1D spatial domain [0, Lx].
-    Per-cell Nanbu or BGK collision steps. Strang splitting in time.
-    Reflective boundary conditions.
+    Particles carry 2D velocity **v** and are advected through a spatial domain
+    whose geometry depends on the chosen test case.  Each time step uses
+    Strang splitting: half-step transport → collision(s) → half-step transport.
+    Collisions are performed cell-by-cell using the Nanbu or BGK scheme.
+
+    Parameters
+    ----------
+    opts : dict
+        Simulation options.  Recognised keys:
+
+        - ``nlocal``          (int)   particles per MPI rank.
+        - ``nu``              (float) collision frequency; default 1.0.
+        - ``dt``              (float) time step; must satisfy dt ≤ 1/nu.
+        - ``bins``            (int)   mesh cells per spatial dimension; default 31.
+        - ``test``            (str)   initial condition / geometry:
+                                      ``"sod"`` or ``"cylinder_flow"``.
+        - ``collision_type``  (str)   ``"nanbu"`` or ``"bgk"``; default ``"nanbu"``.
+        - ``extra_collision`` (int)   collision sub-steps per time step; default 1.
+        - ``seed``            (int)   RNG seed; default 1234.
+        - ``prefix``          (str)   path prefix for output directories.
+
+    info : dict
+        Physical and geometric parameters.  Common keys:
+
+        - ``temperature``  (float) initial temperature; default 1.0.
+        - ``mass``         (float) particle mass; default 1.0.
+
+        Additional keys for ``cylinder_flow``:
+        ``inflow_velocity``, ``cylinder_radius``, ``cylinder_center_x``,
+        ``cylinder_center_y``, ``xmin``, ``xmax``, ``ymin``, ``ymax``.
+
+    comm : MPI.Comm
+        MPI communicator; default ``MPI.COMM_WORLD``.
     """
 
     def __init__(
@@ -48,6 +79,7 @@ class BoltzmannDSMC:
         self.ylim = 10.0
 
         self.rng = np.random.default_rng(opts.get("seed", 1234) + self.rank)
+        self.info = dict(info)
 
         self.history = {
             "step": [],
@@ -66,13 +98,18 @@ class BoltzmannDSMC:
         self.mesh_dim = self.dm.getDimension()
         self.swarm = self._create_swarm()
 
-        from dsmc.plot import init_plot, plot_observables, plot_velocity_histograms, plot_history
+        from dsmc.plot import (init_plot, plot_observables,
+                               plot_cylinder_flow_observables,
+                               plot_velocity_histograms, plot_history)
         from .transport import transport_step
         from .collision import nanbu_collision_step, bgk_collision_step
         from .initial import initialize_particles
 
         self.initialize_particles = initialize_particles.__get__(self)
-        self.plot_observables = plot_observables.__get__(self)
+        if self.test == "cylinder_flow":
+            self.plot_observables = plot_cylinder_flow_observables.__get__(self)
+        else:
+            self.plot_observables = plot_observables.__get__(self)
         self.plot_velocity_histograms = plot_velocity_histograms.__get__(self)
         self.plot_history = plot_history.__get__(self)
         self.transport_step = transport_step.__get__(self)
@@ -83,14 +120,36 @@ class BoltzmannDSMC:
         init_plot()
 
     def _create_mesh(self):
+        """Create the PETSc DMDA background mesh for the chosen test case.
+
+        The mesh is only used for spatial partitioning and cell-list building;
+        particle coordinates are stored on the DMSwarm.  Cell edges are also
+        stored as ``self.edges_x`` (and ``self.edges_y`` for 2-D tests).
+        """
         if self.test == "sod":
             Lx = 1.0
-            self.info = {"Lx": Lx}
+            self.info["Lx"] = Lx
             nx = self.bins
             self.edges_x = np.linspace(0.0, Lx, nx + 1)
             dm = PETSc.DMDA().create([nx + 1, 2], dof=1, stencil_width=1, comm=self.comm)
             dm.setUp()
             dm.setUniformCoordinates(0.0, Lx, 0.0, 1.0)
+        elif self.test == "cylinder_flow":
+            xmin = self.info.get("xmin", -8.0)
+            xmax = self.info.get("xmax", 12.0)
+            ymin = self.info.get("ymin", -5.0)
+            ymax = self.info.get("ymax",  5.0)
+            self.info["xmin"] = xmin
+            self.info["xmax"] = xmax
+            self.info["ymin"] = ymin
+            self.info["ymax"] = ymax
+            nx = self.bins
+            ny = self.bins
+            self.edges_x = np.linspace(xmin, xmax, nx + 1)
+            self.edges_y = np.linspace(ymin, ymax, ny + 1)
+            dm = PETSc.DMDA().create([nx + 1, ny + 1], dof=1, stencil_width=1, comm=self.comm)
+            dm.setUp()
+            dm.setUniformCoordinates(xmin, xmax, ymin, ymax)
         else:
             raise ValueError(f"Unknown test: {self.test}")
         return dm
@@ -113,12 +172,28 @@ class BoltzmannDSMC:
         return swarm
 
     def _construct_grid(self):
+        """Build the velocity-space histogram grid used for plotting."""
         self.grid_x = np.linspace(-self.xlim, self.xlim, self.bins + 1)
         self.grid_y = np.linspace(-self.ylim, self.ylim, self.bins + 1)
         self.delta_x = 2 * self.xlim / self.bins
         self.delta_y = 2 * self.ylim / self.bins
 
     def diagnostics(self, step=0):
+        """Compute and record global moments (called by all ranks).
+
+        Computes the total particle count, mean translational velocity, total
+        kinetic energy, and temperature via MPI allreduce.  Results are appended
+        to ``self.history`` and the history dict is written to disk by rank 0.
+
+        Parameters
+        ----------
+        step : int
+            Current time-step index (used to label the history entry).
+
+        Returns
+        -------
+        dict with keys ``N``, ``mean_u``, ``energy``, ``temperature``.
+        """
         vel = self.swarm.getField("velocity")
         V = vel.reshape(self.nlocal, self.dim)
 
@@ -154,6 +229,20 @@ class BoltzmannDSMC:
         }
 
     def run(self, nsteps: int, monitor_every: int = 10):
+        """Advance the simulation for ``nsteps`` time steps.
+
+        Each step uses Strang splitting:
+        ``transport(dt/2) → collision × extra_collision → transport(dt/2)``.
+        Diagnostics are computed every step; plots are written every
+        ``monitor_every`` steps and at the final step.
+
+        Parameters
+        ----------
+        nsteps : int
+            Number of time steps to run.
+        monitor_every : int
+            Write spatial/velocity plots every this many steps (default 10).
+        """
         d = self.diagnostics()
         if self.rank == 0:
             print(

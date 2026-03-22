@@ -2,9 +2,17 @@ import numpy as np
 import re
 
 def findWholeWord(w):
+    """Return a search function that matches whole-word occurrences of ``w`` (case-insensitive)."""
     return re.compile(r'\b({0})\b'.format(w), flags=re.IGNORECASE).search
 
 def _sample_perturbed_positions_1d(self, N):
+    """Sample N angles from the density f(θ) = 1 + A cos(k θ + shift) on [0, 2π].
+
+    Uses a histogram-based inverse-CDF method: the domain is discretised
+    into fine cells, each cell is assigned a particle count proportional to
+    f evaluated at its midpoint, and samples are drawn uniformly within each
+    cell.  The result is shuffled to remove any ordering artefact.
+    """
     amp = self.info["initial_angle_amplitude"]
     shift = self.info["initial_angle_shift"]
     k = self.info["initial_angle_wavelength"]
@@ -44,6 +52,15 @@ def _sample_perturbed_positions_1d(self, N):
     return sample
 
 def initialize_particles(self):
+    """Initialise particle orientations, velocities, and angular velocities.
+
+    Dispatch based on ``self.test``:
+      - ``uniform_angle``:           θ ~ Uniform(0, 2π)
+      - ``perturbed_uniform_angle``: θ ~ 1 + A cos(k θ)  (via rejection-free sampling)
+
+    Translational velocities are drawn from Uniform(-2, 2)² and angular
+    velocities from Uniform(-1, 1) for all test cases.
+    """
     angle = self.swarm.getField("orientation")
     vel = self.swarm.getField("velocity")
     angular_vel = self.swarm.getField("angular_velocity")

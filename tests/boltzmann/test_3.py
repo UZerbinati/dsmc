@@ -1,11 +1,11 @@
 """
-Sod shock tube — Nanbu, nu=100, extra_collision=100 (many collision sub-steps)
--------------------------------------------------------------------------------
+Sod shock tube test — space-inhomogeneous Boltzmann with Maxwell molecules
+---------------------------------------------------------------------------
 Left state:  rho=1,     T=1.0  (x < 0.5)
 Right state: rho=0.125, T=0.8  (x > 0.5)
 
 Run with:
-    mpirun -n <P> python tests/boltzmann/test_2.py -nlocal 10000 -nsteps 200 \
+    mpirun -n <P> python tests/boltzmann/test_3.py -nlocal 10000 -nsteps 200 \
         -monitor_every 20 -bins 64 -nu 100 -dt 0.001
 """
 import sys
@@ -25,8 +25,8 @@ dt = Opt.getReal("dt", 0.01)
 nu = Opt.getReal("nu", 100)
 nsteps = Opt.getInt("nsteps", 2000)
 seed = Opt.getInt("seed", 42)
-collision_type = Opt.getString("collision_type", "nanbu")
-extra_collision = Opt.getInt("extra_collision", 0) + 100
+collision_type = Opt.getString("collision_type", "bgk")
+extra_collision = Opt.getInt("extra_collision", 0) + 1
 monitor_every = Opt.getInt("monitor_every", 20)
 
 Print(f"  nlocal={nlocal}")
@@ -50,7 +50,7 @@ opts = {
     "collision_type": collision_type,
     "seed": seed,
     "test": "sod",
-    "prefix": "output/test_2",
+    "prefix": "output/test_3",
 }
 info = {
     "temperature": 1.0,

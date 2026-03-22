@@ -3,6 +3,16 @@ from dsmc.utils import build_cell_lists, get_particle_cells
 
 
 def nanbu_collision_step(self):
+    """Nanbu collision step for Maxwell molecules (per-cell).
+
+    Within each spatial cell the number of collision pairs is
+        Mcol = floor(nu * n * dt / 2),
+    where n is the local particle count.  For Maxwell molecules the collision
+    kernel is independent of the relative speed, so pairs are drawn by uniform
+    random permutation.  Post-collisional velocities conserve momentum and
+    kinetic energy via isotropic scattering: the relative speed is preserved
+    but its direction is randomised uniformly on the unit circle.
+    """
     cells = get_particle_cells(self)
     cell_lists = build_cell_lists(cells)
     vel = self.swarm.getField("velocity")
@@ -12,6 +22,7 @@ def nanbu_collision_step(self):
         if n < 2:
             continue
 
+        # Number of collision pairs; keep even and within available particles.
         Mcol = int(0.5 * self.nu * n * self.dt)
         Mcol = Mcol if Mcol % 2 == 0 else Mcol - 1
         if 2 * Mcol > n:
@@ -19,18 +30,18 @@ def nanbu_collision_step(self):
         if Mcol <= 0:
             continue
 
+        # Select 2*Mcol distinct particles and split into partner lists i, j.
         pairs = self.rng.choice(plist, 2 * Mcol, replace=False)
         i, j = pairs[:Mcol], pairs[Mcol:]
 
         vi = vel[i].copy()
         vj = vel[j].copy()
 
-        g = vi - vj
-        G = 0.5 * (vi + vj)
-        g_norm = np.linalg.norm(g, axis=1)
+        G      = 0.5 * (vi + vj)           # centre-of-mass velocity
+        g_norm = np.linalg.norm(vi - vj, axis=1)  # relative speed (conserved)
 
-        # Isotropic scattering: post-collisional relative velocity has same
-        # magnitude but random direction (Maxwell molecules)
+        # Isotropic scattering: post-collisional relative velocity has the same
+        # magnitude but a uniformly random direction on the unit circle.
         sigma = self.rng.uniform(0.0, 2.0 * np.pi, Mcol)
         vel[i, 0] = G[:, 0] + 0.5 * g_norm * np.cos(sigma)
         vel[i, 1] = G[:, 1] + 0.5 * g_norm * np.sin(sigma)
@@ -41,6 +52,14 @@ def nanbu_collision_step(self):
 
 
 def bgk_collision_step(self):
+    """BGK relaxation step (per-cell).
+
+    Each cell's particle velocities are replaced by samples drawn from the
+    local Maxwellian (a Gaussian with the cell's mean velocity and
+    temperature).  The sample is adjusted twice so that the cell mean
+    velocity and mean kinetic energy match the pre-collision values exactly,
+    enforcing discrete conservation of momentum and energy.
+    """
     cells = _get_particle_cells(self)
     cell_lists = _build_cell_lists(cells)
     vel = self.swarm.getField("velocity")
