@@ -22,12 +22,12 @@ nlocal = Opt.getReal("nlocal", 1e7)
 nlocal = int(nlocal)
 bins = Opt.getInt("bins", 512)
 dt = Opt.getReal("dt", 0.01)
-nu = Opt.getReal("nu", 10)
+nu = Opt.getReal("nu", 100)
 nsteps = Opt.getInt("nsteps", 2000)
 seed = Opt.getInt("seed", 42)
 collision_type = Opt.getString("collision_type", "nanbu")
-extra_collision = Opt.getInt("extra_collision", 0) + 1
-monitor_every = Opt.getInt("monitor_every", 5)
+extra_collision = Opt.getInt("extra_collision", 0) + 100
+monitor_every = Opt.getInt("monitor_every", 20)
 
 Print(f"  nlocal={nlocal}")
 Print(f"  nu={nu}")
@@ -50,7 +50,7 @@ opts = {
     "collision_type": collision_type,
     "seed": seed,
     "test": "sod",
-    "prefix": "output/test_0",
+    "prefix": "output/test_2",
 }
 info = {
     "temperature": 1.0,
