@@ -1,27 +1,8 @@
 import matplotlib.pyplot as plt
-import matplotlib as mpl
 import numpy as np
 import pickle
 from mpi4py import MPI
-
-
-def init_plot():
-    mpl.rcParams.update({
-        "font.family": "serif",
-        "mathtext.fontset": "cm",
-        "font.size": 10,
-        "axes.labelsize": 11,
-        "xtick.labelsize": 9,
-        "ytick.labelsize": 9,
-        "axes.linewidth": 0.8,
-        "lines.linewidth": 1.5,
-        "xtick.direction": "in",
-        "ytick.direction": "in",
-        "xtick.major.size": 4,
-        "ytick.major.size": 4,
-        "xtick.minor.size": 2,
-        "ytick.minor.size": 2,
-    })
+from dsmc.utils import init_plot, pv_cmap
 
 
 def plot_observables(self, prefix=""):
@@ -106,7 +87,7 @@ def plot_velocity_histograms(self, prefix=""):
     )
     normalisation = H.sum() * (self.delta_x * self.delta_y)
     H = H / normalisation
-    pcm = ax.pcolormesh(xedges, yedges, H.T, shading="auto", rasterized=True)
+    pcm = ax.pcolormesh(xedges, yedges, H.T, cmap=pv_cmap, shading="auto", rasterized=True)
     ax.set_xlabel(r"$v_x$")
     ax.set_ylabel(r"$v_y$")
     ax.set_xlim(-self.xlim, self.xlim)

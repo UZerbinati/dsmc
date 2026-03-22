@@ -1,35 +1,10 @@
 import numpy as np
-
-
-def _build_cell_lists(cells):
-    if cells.size == 0:
-        return {}
-    order = np.argsort(cells)
-    cells_sorted = cells[order]
-    starts = np.flatnonzero(
-        np.r_[True, cells_sorted[1:] != cells_sorted[:-1]]
-    )
-    ends = np.r_[starts[1:], len(cells_sorted)]
-    cell_lists = {}
-    for a, b in zip(starts, ends):
-        c = int(cells_sorted[a])
-        cell_lists[c] = order[a:b]
-    return cell_lists
-
-
-def _get_particle_cells(self):
-    celldm = self.swarm.getCellDMActive()
-    cellid_name = celldm.getCellID()
-    arr = self.swarm.getField(cellid_name)
-    try:
-        return np.asarray(arr).reshape(-1).astype(np.int32).copy()
-    finally:
-        self.swarm.restoreField(cellid_name)
+from dsmc.utils import build_cell_lists, get_particle_cells
 
 
 def nanbu_collision_step(self):
-    cells = _get_particle_cells(self)
-    cell_lists = _build_cell_lists(cells)
+    cells = get_particle_cells(self)
+    cell_lists = build_cell_lists(cells)
     vel = self.swarm.getField("velocity")
 
     for cell, plist in cell_lists.items():
