@@ -49,13 +49,13 @@ info = {"inertia": 1.0,
         "om": 1.0,       # rotational restitution
         "cutoff": 0.1,   # angular cutoff
        }
-    = lambda theta, theta_av: -np.sin(theta-theta_av)
-
+comm = MPI.COMM_WORLD
 def vlasov_force(theta):
-    #TODO: This will have to become a collective action in parallel
-    nu_x = np.sum(np.cos(angle))/self.nlocal
-    nu_y = np.sum(np.sin(angle))/self.nlocal
-    angle_av = (np.atan2(nu_y,nu_x)+2*np.pi)%(2*np.pi)
+    local_nu_x = np.sum(np.cos(theta))
+    local_nu_y = np.sum(np.sin(theta))
+    global_nu_x = comm.allreduce(local_nu_x, op=MPI.SUM)
+    global_nu_y = comm.allreduce(local_nu_y, op=MPI.SUM)
+    angle_av = (np.arctan2(global_nu_y, global_nu_x) + 2*np.pi) % (2*np.pi)
     return -np.sin(theta-angle_av)
 
 sim = CFMDSMC(

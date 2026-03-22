@@ -77,9 +77,10 @@ class CFMDSMC:
             "circular_var": []
         }
 
-        self.output_path = f'{self.prefix}_output_cfm_{self.collision_type}' 
-        if not os.path.exists(self.output_path):
-            os.makedirs(self.output_path)
+        self.output_path = f'{self.prefix}_output_cfm_{self.collision_type}'
+        if self.rank == 0:
+            os.makedirs(self.output_path, exist_ok=True)
+        self.comm.Barrier()
 
         self.dm = self._create_mesh()
         self.mesh_dim = self.dm.getDimension()
@@ -170,14 +171,15 @@ class CFMDSMC:
         temp = (2.0 / (self.dim+1)) * global_energy / global_n 
         
         #Circular stats
-        #TODO: Think how to parallerlise this!
         if self.variance == "circle":
             z = np.exp(1j*angle)
         elif self.variance == "real_projective_plane":
             z = np.exp(2j*np.mod(angle, np.pi))
         else:
             raise RuntimeError(f"[!] Do not know how to compute the variance for {self.variance}")
-        m = np.sum(z)/self.nlocal
+        local_z_sum = np.sum(z)
+        global_z_sum = self.comm.allreduce(local_z_sum, op=MPI.SUM)
+        m = global_z_sum / global_n
         R = np.abs(m)
 
         
@@ -193,8 +195,9 @@ class CFMDSMC:
         self.swarm.restoreField("angular_velocity")
 
 
-        with open(f'{self.output_path}/history.pickle', 'wb') as fp:
-            pickle.dump(self.history, fp)
+        if self.rank == 0:
+            with open(f'{self.output_path}/history.pickle', 'wb') as fp:
+                pickle.dump(self.history, fp)
 
         return {
             "N": global_n,
@@ -221,8 +224,8 @@ class CFMDSMC:
         return Maxwellian, Maxwellian_x, Maxwellian_y, Maxwellian_omega
 
     def run(self, nsteps: int, monitor_every: int = 10):
+        d = self.diagnostics()
         if self.rank == 0:
-            d = self.diagnostics()
             print(
                 f"[step 0] N={d['N']}, t = 0.0 "
                 f"T={d['temperature']:.6e} "
@@ -230,8 +233,7 @@ class CFMDSMC:
                 f"circ_var={np.linalg.norm(d['circular_var']):.6e} "
             )
         self._construct_grid()
-        if self.rank == 0:
-            self.plot_histograms(prefix=f"{self.output_path}/dsmc_0")
+        self.plot_histograms(prefix=f"{self.output_path}/dsmc_0")
         for step in range(1, nsteps + 1):
             self.transport_step(dt=0.5*self.dt)
             for coll_index in range(self.extra_collision):
@@ -248,7 +250,8 @@ class CFMDSMC:
                     f"|u|={np.linalg.norm(d['mean_u']):.6e} "
                     f"circ_var={np.linalg.norm(d['circular_var']):.6e} "
                 )
-                if step % monitor_every == 0 or step == nsteps:
-                    self.plot_histograms(prefix=f"{self.output_path}/dsmc_{step}")
+            if step % monitor_every == 0 or step == nsteps:
+                self.plot_histograms(prefix=f"{self.output_path}/dsmc_{step}")
+                if self.rank == 0:
                     self.plot_history(prefix=f"{self.output_path}/dsmc")
             gc.collect()

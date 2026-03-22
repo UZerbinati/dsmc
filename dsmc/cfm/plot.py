@@ -130,31 +130,24 @@ def plot_histograms(self, prefix=""):
     Vlocal = vel.reshape(self.nlocal, self.dim).copy()
     self.swarm.restoreField("velocity")
 
-    gathered = self.comm.gather(Vlocal, root=0)
-    if self.rank != 0:
-        return
-
-    V = np.vstack(gathered)
-
     angle = self.swarm.getField("orientation")
     Alocal = angle.reshape(self.nlocal, 1).copy()
     self.swarm.restoreField("orientation")
-
-    gathered = self.comm.gather(Alocal, root=0)
-    if self.rank != 0:
-        return
-
-    A = np.vstack(gathered)
 
     omega = self.swarm.getField("angular_velocity")
     Wlocal = omega.reshape(self.nlocal, 1).copy()
     self.swarm.restoreField("angular_velocity")
 
-    gathered = self.comm.gather(Wlocal, root=0)
+    V_gathered = self.comm.gather(Vlocal, root=0)
+    A_gathered = self.comm.gather(Alocal, root=0)
+    W_gathered = self.comm.gather(Wlocal, root=0)
+
     if self.rank != 0:
         return
 
-    W = np.vstack(gathered)
+    V = np.vstack(V_gathered)
+    A = np.vstack(A_gathered)
+    W = np.vstack(W_gathered)
 
 
     fig, ax = plt.subplots(figsize=(5.5, 3.6))
