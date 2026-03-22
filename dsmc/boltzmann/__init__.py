@@ -66,7 +66,7 @@ class BoltzmannDSMC:
         self.mesh_dim = self.dm.getDimension()
         self.swarm = self._create_swarm()
 
-        from .plot import init_plot, plot_observables, plot_velocity_histograms, plot_history
+        from dsmc.plot import init_plot, plot_observables, plot_velocity_histograms, plot_history
         from .transport import transport_step
         from .collision import nanbu_collision_step, bgk_collision_step
         from .initial import initialize_particles
