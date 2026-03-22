@@ -48,11 +48,15 @@ info = {"inertia": 1.0,
         "ev": 1.0,       # translational restitution
         "om": 1.0,       # rotational restitution
         "cutoff": 0.1,   # angular cutoff
-        "initial_angle_amplitude": 1e-1, #amplitude perturbation from uniform for initial angle distribution
-        "initial_angle_shift": -0.3, #amplitude perturbation from uniform for initial angle distribution
-        "initial_angle_wavelength": 1, #amplitude perturbation from uniform for initial angle distribution
        }
-vlasov_force = lambda theta, theta_av: -np.sin(theta-theta_av)
+
+def vlasov_force(theta):
+    #TODO: This will have to become a collective action in parallel
+    nu_x = np.sum(np.cos(angle))/self.nlocal
+    nu_y = np.sum(np.sin(angle))/self.nlocal
+    angle_av = (np.atan2(nu_y,nu_x)+2*np.pi)%(2*np.pi)
+    return -np.sin(theta-angle_av)
+
 sim = CFMDSMC(
     nlocal=nlocal,
     nu=nu,

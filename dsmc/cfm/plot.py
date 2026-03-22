@@ -3,6 +3,7 @@ import matplotlib as mpl
 import matplotlib.colors as mcolors
 from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
+import pickle
 
 def init_plot():
     # --- SIAM style ---
@@ -185,7 +186,12 @@ def plot_histograms(self, prefix=""):
     fig.savefig(f"{prefix}_vel.pdf", bbox_inches="tight")
     fig.savefig(f"{prefix}_vel.png", dpi=400, bbox_inches="tight")
     plt.close(fig)
-    np.save(f"{prefix}_vel.npy", V)
+    if self.dump == "particles":
+        np.save(f"{prefix}_vel.npy", V)
+    elif self.dump == "hist":
+        with open(f'{prefix}_vel.pickle', 'wb') as fp:
+            data = {"hist": H, "xedges": xedges, "yedges": yedges}
+            pickle.dump(data, fp)
     #Marginals
     H_x = np.sum(H, axis=1)*self.delta_y
     normalisation = np.sum(H_x)*self.delta_x
@@ -251,8 +257,13 @@ def plot_histograms(self, prefix=""):
     fig.savefig(f"{prefix}_angular.pdf", bbox_inches="tight")
     fig.savefig(f"{prefix}_angular.png", dpi=400, bbox_inches="tight")
     plt.close(fig)
-    np.save(f"{prefix}_theta.npy", A)
-    np.save(f"{prefix}_omega.npy", W)
+    if self.dump == "particles":
+        np.save(f"{prefix}_theta.npy", A)
+        np.save(f"{prefix}_omega.npy", W)
+    elif self.dump == "hist":
+        with open(f'{prefix}_angular.pickle', 'wb') as fp:
+            data = {"hist_theta": A, "hist_omega": W, "theta_edges": thetaedges, "omegaedges": omegaedges}
+            pickle.dump(data, fp)
     #Marginals
     H_theta = np.sum(H, axis=1)*self.delta_omega
     normalisation = np.sum(H_theta)*self.delta_omega

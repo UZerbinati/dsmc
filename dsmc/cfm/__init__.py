@@ -33,6 +33,7 @@ class CFMDSMC:
         seed: int = 1234,
         bins: int = 31,
         test: str = "sod",
+        variance: str = "circle",
         prefix: str = "",
         comm: MPI.Comm = MPI.COMM_WORLD,
     ): 
@@ -51,11 +52,13 @@ class CFMDSMC:
         self.bins = bins
         self.delta_bins = 1/(bins+1)
         self.test = test
+        self.variance = variance
         self.prefix = prefix
         self.extra_collision = extra_collision
         self.grazing_collision = grazing_collision
         self.collision_type = collision_type
         self.vlasov_force = vlasov_force
+        self.dump = "hist"
 
 
         self.xlim = 10.0
@@ -168,7 +171,12 @@ class CFMDSMC:
         
         #Circular stats
         #TODO: Think how to parallerlise this!
-        z = np.exp(1j*angle)
+        if self.variance == "circle":
+            z = np.exp(1j*angle)
+        elif self.variance == "real_projective_plane":
+            z = np.exp(2j*np.mod(angle, np.pi))
+        else:
+            raise RuntimeError(f"[!] Do not know how to compute the variance for {self.variance}")
         m = np.sum(z)/self.nlocal
         R = np.abs(m)
 

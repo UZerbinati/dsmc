@@ -48,7 +48,13 @@ info = {"inertia": 1.0,
         "om": 1.0,       # rotational restitution
         "cutoff": 0.1,   # angular cutoff
        }
-vlasov_force = lambda theta, theta_av: -4*(theta-theta_av)
+def vlasov_force(theta):
+    #TODO: This will have to become a collective action in parallel
+    nu_x = np.sum(np.cos(angle))/self.nlocal
+    nu_y = np.sum(np.sin(angle))/self.nlocal
+    angle_av = (np.atan2(nu_y,nu_x)+2*np.pi)%(2*np.pi)
+    return -4*(theta-angle_av)
+
 sim = CFMDSMC(
     nlocal=nlocal,
     nu=nu,
