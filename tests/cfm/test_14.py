@@ -11,6 +11,7 @@ from petsc4py import PETSc
 from mpi4py import MPI
 from dsmc import CFMDSMC, Print
 import numpy as np
+import matplotlib.pyplot as plt
 
 Opt = PETSc.Options()
 Print("Running homogeneous CFM DSMC with options:")
@@ -52,6 +53,14 @@ info = {"inertia": 1.0,
         "initial_angle_shift": -0.3, #amplitude perturbation from uniform for initial angle distribution
         "initial_angle_wavelength": 1, #amplitude perturbation from uniform for initial angle distribution
        }
+vlasov_energy_history = []
+vlasov_interpolant_mesh = np.linspace(0, 2*np.pi, bins)
+def hat_interpolant(x,y, mesh):
+    hat = lambda t: 1-np.abs(t)
+    interpolant = y[...,None]*hat(x[...,None][:,0]-mesh)
+    interpolant = (1/interpolant.shape[0])*interpolant
+    return np.sum(interpolant, axis=0)
+
 comm = MPI.COMM_WORLD
 def vlasov_force(theta):
     hist, theta_edges = np.histogram(theta, bins=bins)
@@ -65,9 +74,27 @@ def vlasov_force(theta):
     B = np.sign(np.sin(theta[...,None][:,0]-centers))
     A = np.cos(theta[...,None][:,0]-centers)
     force = -np.sum(A*B*hist, axis=1)*delta_theta
-    print("Force mean: ", np.sum(np.abs(force))/len(force))
-    print("Force max: ", np.max(np.abs(force)))
-    print("Force min: ", np.min(np.abs(force)))
+    if comm.Get_rank() == 0:
+        vlasov_interpolant = hat_interpolant(theta, force, vlasov_interpolant_mesh)
+        vlasov_energy_history.append(np.sqrt(np.sum(np.abs(vlasov_interpolant)**2) \
+                                    /vlasov_interpolant_mesh[1]-vlasov_interpolant_mesh[0])
+                                    )
+        fig, ax = plt.subplots(figsize=(5.5, 3.2))
+        time = np.array(range(len(vlasov_energy_history)))*dt
+        ax.plot(time,
+            vlasov_energy_history,
+            color="black",
+            linewidth=1.5,
+        )
+        ax.set_xlabel(r"$t$")
+        ax.set_ylabel(r"$|\mathcal{V}(\theta)|$")
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.8)
+        ax.tick_params(which="both", direction="in", top=True, right=True)
+        fig.tight_layout(pad=0.2)
+        fig.savefig(f"output/test_14/vlasov_energy.pdf", bbox_inches="tight")
+        fig.savefig(f"output/test_14/vlasov_energy.png", dpi=400, bbox_inches="tight")
+        plt.close(fig)
     return (L**2)*force.reshape(force.shape[0],1)
 
 opts = {
