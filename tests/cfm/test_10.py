@@ -18,13 +18,13 @@ Print("Running homogeneous CFM DSMC with options:")
 nlocal = Opt.getReal("nlocal", 1e6)
 nlocal = int(nlocal)
 bins = Opt.getInt("bins", 128)
-dt = Opt.getReal("dt", 0.1)
-nu = Opt.getReal("nu", 10)
+dt = Opt.getReal("dt", 0.01)
+nu = Opt.getReal("nu", 100)
 nsteps = Opt.getInt("nsteps", 2000)
 seed = Opt.getInt("seed", 47)
 grazing_collision = Opt.getBool("grazing_collision", False)
 collision_type = Opt.getString("collision_type", "nanbu")
-extra_collision = Opt.getInt("extra_collision", 10)+1
+extra_collision = Opt.getInt("extra_collision", 0)+1
 monitor_every = Opt.getInt("monitor_every", 10)
 
 Print(f"  nlocal={nlocal}")
