@@ -41,18 +41,24 @@ Print(f"  extra_collision={extra_collision}")
 Print(f"  collision_type={collision_type}")
 Print("--------------------------------------------------------------------")
 
+opts = {
+    "nlocal": nlocal,
+    "nu": nu,
+    "dt": dt,
+    "bins": bins,
+    "extra_collision": extra_collision,
+    "collision_type": collision_type,
+    "seed": seed,
+    "test": "sod",
+    "prefix": "output/test_0",
+}
+info = {
+    "temperature": 1.0,
+    "mass": 1.0,
+}
 sim = BoltzmannDSMC(
-    nlocal=nlocal,
-    nu=nu,
-    dt=dt,
-    bins=bins,
-    temperature=1.0,
-    mass=1.0,
-    extra_collision=extra_collision,
-    collision_type=collision_type,
-    seed=seed,
-    test="sod",
-    prefix="output/test_0",
+    opts=opts,
+    info=info,
     comm=MPI.COMM_WORLD,
 )
 sim.run(nsteps=nsteps, monitor_every=monitor_every)

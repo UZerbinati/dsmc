@@ -58,19 +58,22 @@ def vlasov_force(theta):
     angle_av = (np.arctan2(global_nu_y, global_nu_x) + 2*np.pi) % (2*np.pi)
     return -4*(theta-angle_av)
 
+opts = {
+    "nlocal": nlocal,
+    "nu": nu,
+    "dt": dt,
+    "bins": bins,
+    "extra_collision": extra_collision,
+    "grazing_collision": grazing_collision,
+    "collision_type": collision_type,
+    "seed": seed,
+    "test": "uniform_angle",
+    "prefix": "output/test_3",
+}
 sim = CFMDSMC(
-    nlocal=nlocal,
-    nu=nu,
-    dt=dt,
-    bins = bins,
+    opts=opts,
     info=info,
-    extra_collision=extra_collision,
-    grazing_collision=grazing_collision,
-    collision_type=collision_type,
-    vlasov_force = vlasov_force,
-    seed=seed,
-    test="uniform_angle",
-    prefix="output/test_3",
+    vlasov_force=vlasov_force,
     comm=MPI.COMM_WORLD,
 )
 sim.run(nsteps=nsteps, monitor_every=monitor_every)

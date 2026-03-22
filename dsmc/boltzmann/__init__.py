@@ -20,17 +20,8 @@ class BoltzmannDSMC:
 
     def __init__(
         self,
-        nlocal: int,
-        nu: float = 1.0,
-        dt: float = 1e-2,
-        temperature: float = 1.0,
-        mass: float = 1.0,
-        extra_collision: int = 1,
-        collision_type: str = "nanbu",
-        seed: int = 1234,
-        bins: int = 31,
-        test: str = "sod",
-        prefix: str = "",
+        opts: dict,
+        info: dict = {},
         comm: MPI.Comm = MPI.COMM_WORLD,
     ):
         self.comm = comm
@@ -38,25 +29,25 @@ class BoltzmannDSMC:
         self.size = comm.Get_size()
 
         self.dim = 2
-        self.effective_dim = 1 if test == "sod" else self.dim
-        self.nlocal = nlocal
-        self.N = nlocal * self.size
-        self.nu = nu
-        self.dt = dt
-        if 1 / nu < dt:
+        self.nlocal = int(opts["nlocal"])
+        self.N = self.nlocal * self.size
+        self.nu = opts.get("nu", 1.0)
+        self.dt = opts.get("dt", 1e-2)
+        if 1 / self.nu < self.dt:
             raise RuntimeError("Time step too large for the collision frequency specified.")
-        self.temperature = temperature
-        self.mass = mass
-        self.bins = bins
-        self.test = test
-        self.prefix = prefix
-        self.extra_collision = extra_collision
-        self.collision_type = collision_type
+        self.temperature = info.get("temperature", 1.0)
+        self.mass = info.get("mass", 1.0)
+        self.bins = opts.get("bins", 31)
+        self.test = opts.get("test", "sod")
+        self.prefix = opts.get("prefix", "")
+        self.extra_collision = opts.get("extra_collision", 1)
+        self.collision_type = opts.get("collision_type", "nanbu")
+        self.effective_dim = 1 if self.test == "sod" else self.dim
 
         self.xlim = 10.0
         self.ylim = 10.0
 
-        self.rng = np.random.default_rng(seed + self.rank)
+        self.rng = np.random.default_rng(opts.get("seed", 1234) + self.rank)
 
         self.history = {
             "step": [],

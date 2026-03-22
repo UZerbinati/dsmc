@@ -22,41 +22,31 @@ class CFMDSMC:
 
     def __init__(
         self,
-        nlocal: int,
-        nu: float = 1.0,
-        dt: float = 1e-2,
+        opts: dict,
         info: dict = {},
-        extra_collision: int = 1,
-        grazing_collision: bool = False,
-        collision_type: str = "nanbu",
-        vlasov_force = None,
-        seed: int = 1234,
-        bins: int = 31,
-        test: str = "sod",
-        variance: str = "circle",
-        prefix: str = "",
+        vlasov_force=None,
         comm: MPI.Comm = MPI.COMM_WORLD,
-    ): 
+    ):
         self.comm = comm
         self.rank = comm.Get_rank()
         self.size = comm.Get_size()
 
         self.dim = 2
-        self.nlocal = nlocal
+        self.nlocal = int(opts["nlocal"])
         self.N = self.nlocal * self.size
-        self.nu = nu 
-        self.dt = dt
-        if 1/nu < dt:
+        self.nu = opts.get("nu", 1.0)
+        self.dt = opts.get("dt", 1e-2)
+        if 1 / self.nu < self.dt:
             raise RuntimeError("You have too large of a time-step for the collisional frequency you specified")
         self.info = info
-        self.bins = bins
-        self.delta_bins = 1/(bins+1)
-        self.test = test
-        self.variance = variance
-        self.prefix = prefix
-        self.extra_collision = extra_collision
-        self.grazing_collision = grazing_collision
-        self.collision_type = collision_type
+        self.bins = opts.get("bins", 31)
+        self.delta_bins = 1 / (self.bins + 1)
+        self.test = opts.get("test", "uniform_angle")
+        self.variance = opts.get("variance", "circle")
+        self.prefix = opts.get("prefix", "")
+        self.extra_collision = opts.get("extra_collision", 1)
+        self.grazing_collision = opts.get("grazing_collision", False)
+        self.collision_type = opts.get("collision_type", "nanbu")
         self.vlasov_force = vlasov_force
         self.dump = "hist"
 
@@ -64,7 +54,7 @@ class CFMDSMC:
         self.xlim = 10.0
         self.ylim = 10.0
 
-        self.rng = np.random.default_rng(seed + self.rank)
+        self.rng = np.random.default_rng(opts.get("seed", 1234) + self.rank)
 
         # History of simulation
         self.history = {

@@ -67,20 +67,23 @@ def vlasov_force(theta):
     print("Force min: ", np.min(np.abs(force)))
     return (L**2)*force.reshape(force.shape[0],1)
 
+opts = {
+    "nlocal": nlocal,
+    "nu": nu,
+    "dt": dt,
+    "bins": bins,
+    "extra_collision": extra_collision,
+    "grazing_collision": grazing_collision,
+    "collision_type": collision_type,
+    "seed": seed,
+    "test": "uniform_angle",
+    "variance": "real_projective_plane",
+    "prefix": "output/test_8",
+}
 sim = CFMDSMC(
-    nlocal=nlocal,
-    nu=nu,
-    dt=dt,
-    bins = bins,
+    opts=opts,
     info=info,
-    extra_collision=extra_collision,
-    grazing_collision=grazing_collision,
-    collision_type=collision_type,
-    vlasov_force = vlasov_force,
-    seed=seed,
-    test="uniform_angle",
-    variance="real_projective_plane", 
-    prefix="output/test_8",
+    vlasov_force=vlasov_force,
     comm=MPI.COMM_WORLD,
 )
 sim.run(nsteps=nsteps, monitor_every=monitor_every)

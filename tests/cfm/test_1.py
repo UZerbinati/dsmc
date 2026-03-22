@@ -45,18 +45,21 @@ info = {"inertia": 1.0,
         "om": 1.0,       # rotational restitution
         "cutoff": 0.1,   # angular cutoff
        }
+opts = {
+    "nlocal": nlocal,
+    "nu": nu,
+    "dt": dt,
+    "bins": bins,
+    "extra_collision": extra_collision,
+    "grazing_collision": grazing_collision,
+    "collision_type": collision_type,
+    "seed": seed,
+    "test": "uniform_angle",
+    "prefix": "output/test_1",
+}
 sim = CFMDSMC(
-    nlocal=nlocal,
-    nu=nu,
-    dt=dt,
-    bins = bins,
+    opts=opts,
     info=info,
-    extra_collision=extra_collision,
-    grazing_collision=grazing_collision,
-    collision_type=collision_type,
-    seed=seed,
-    test="uniform_angle",
-    prefix="output/test_1",
     comm=MPI.COMM_WORLD,
 )
 sim.run(nsteps=nsteps, monitor_every=monitor_every)
