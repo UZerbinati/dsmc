@@ -272,6 +272,91 @@ def plot_observables(self, prefix=""):
         pickle.dump({"x": x_centers, "rho": rho_x, "vel_x": vel_x, "temp": temp_x}, fp)
 
 
+def plot_cylinder_flow_observables(self, prefix=""):
+    """2D spatial fields (density, speed, temperature) for flow past a cylinder."""
+    from mpi4py import MPI
+
+    vel = self.swarm.getField("velocity")
+    V = vel.reshape(self.nlocal, self.dim).copy()
+    self.swarm.restoreField("velocity")
+
+    celldm = self.swarm.getCellDMActive()
+    coord_names = celldm.getCoordinateFields()
+    pos = self.swarm.getField(coord_names[0])
+    X = pos.reshape(self.nlocal, self.mesh_dim).copy()
+    self.swarm.restoreField(coord_names[0])
+
+    edges_x = self.edges_x
+    edges_y = self.edges_y
+    xpos = X[:, 0]
+    ypos = X[:, 1]
+
+    # Per-rank 2D histograms
+    local_counts, _, _ = np.histogram2d(xpos, ypos, bins=(edges_x, edges_y))
+    local_vx, _, _ = np.histogram2d(xpos, ypos, bins=(edges_x, edges_y), weights=V[:, 0])
+    local_vy, _, _ = np.histogram2d(xpos, ypos, bins=(edges_x, edges_y), weights=V[:, 1])
+    local_ke, _, _ = np.histogram2d(
+        xpos, ypos, bins=(edges_x, edges_y), weights=V[:, 0] ** 2 + V[:, 1] ** 2
+    )
+
+    global_counts = self.comm.allreduce(local_counts, op=MPI.SUM)
+    global_vx     = self.comm.allreduce(local_vx,     op=MPI.SUM)
+    global_vy     = self.comm.allreduce(local_vy,     op=MPI.SUM)
+    global_ke     = self.comm.allreduce(local_ke,     op=MPI.SUM)
+
+    if self.rank != 0:
+        return
+
+    safe = np.where(global_counts > 0, global_counts, 1.0)
+    cell_area = (edges_x[1] - edges_x[0]) * (edges_y[1] - edges_y[0])
+    total_n = global_counts.sum()
+    rho   = global_counts / (max(total_n, 1) * cell_area)
+    ux    = global_vx / safe
+    uy    = global_vy / safe
+    speed = np.sqrt(ux ** 2 + uy ** 2)
+    temp  = self.mass * global_ke / safe - self.mass * (ux ** 2 + uy ** 2)
+    temp  = np.where(global_counts > 1, temp, 0.0)
+
+    # Cylinder outline for overlay
+    cx = self.info.get("cylinder_center_x", 0.0)
+    cy = self.info.get("cylinder_center_y", 0.0)
+    R  = self.info.get("cylinder_radius",   1.0)
+    theta_cyl = np.linspace(0.0, 2.0 * np.pi, 300)
+    cyl_x = cx + R * np.cos(theta_cyl)
+    cyl_y = cy + R * np.sin(theta_cyl)
+
+    for data, label, fname_suffix in [
+        (rho.T,   r"$\rho$",  "_density"),
+        (speed.T, r"$|u|$",   "_speed"),
+        (temp.T,  r"$T$",     "_temperature"),
+    ]:
+        fig, ax = plt.subplots(figsize=(8, 4))
+        pcm = ax.pcolormesh(
+            edges_x, edges_y, data,
+            cmap=pv_cmap, shading="auto", rasterized=True,
+        )
+        ax.plot(cyl_x, cyl_y, color="white", linewidth=1.0)
+        ax.set_xlabel(r"$x$")
+        ax.set_ylabel(r"$y$")
+        ax.set_aspect("equal")
+        ax.tick_params(which="both", direction="in", top=True, right=True)
+        cbar = fig.colorbar(pcm, ax=ax, pad=0.02)
+        cbar.ax.tick_params(labelsize=8)
+        cbar.set_label(label, fontsize=10)
+        fig.tight_layout(pad=0.2)
+        fig.savefig(f"{prefix}{fname_suffix}.pdf", bbox_inches="tight")
+        fig.savefig(f"{prefix}{fname_suffix}.png", dpi=400, bbox_inches="tight")
+        plt.close(fig)
+
+    import pickle
+    with open(f"{prefix}_observables.pickle", "wb") as fp:
+        pickle.dump({
+            "x": 0.5 * (edges_x[:-1] + edges_x[1:]),
+            "y": 0.5 * (edges_y[:-1] + edges_y[1:]),
+            "rho": rho, "ux": ux, "uy": uy, "temp": temp,
+        }, fp)
+
+
 def plot_velocity_histograms(self, prefix=""):
     """2D velocity histogram gathered to rank 0."""
     vel = self.swarm.getField("velocity")

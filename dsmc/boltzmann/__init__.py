@@ -48,6 +48,7 @@ class BoltzmannDSMC:
         self.ylim = 10.0
 
         self.rng = np.random.default_rng(opts.get("seed", 1234) + self.rank)
+        self.info = dict(info)
 
         self.history = {
             "step": [],
@@ -66,13 +67,18 @@ class BoltzmannDSMC:
         self.mesh_dim = self.dm.getDimension()
         self.swarm = self._create_swarm()
 
-        from dsmc.plot import init_plot, plot_observables, plot_velocity_histograms, plot_history
+        from dsmc.plot import (init_plot, plot_observables,
+                               plot_cylinder_flow_observables,
+                               plot_velocity_histograms, plot_history)
         from .transport import transport_step
         from .collision import nanbu_collision_step, bgk_collision_step
         from .initial import initialize_particles
 
         self.initialize_particles = initialize_particles.__get__(self)
-        self.plot_observables = plot_observables.__get__(self)
+        if self.test == "cylinder_flow":
+            self.plot_observables = plot_cylinder_flow_observables.__get__(self)
+        else:
+            self.plot_observables = plot_observables.__get__(self)
         self.plot_velocity_histograms = plot_velocity_histograms.__get__(self)
         self.plot_history = plot_history.__get__(self)
         self.transport_step = transport_step.__get__(self)
@@ -85,12 +91,28 @@ class BoltzmannDSMC:
     def _create_mesh(self):
         if self.test == "sod":
             Lx = 1.0
-            self.info = {"Lx": Lx}
+            self.info["Lx"] = Lx
             nx = self.bins
             self.edges_x = np.linspace(0.0, Lx, nx + 1)
             dm = PETSc.DMDA().create([nx + 1, 2], dof=1, stencil_width=1, comm=self.comm)
             dm.setUp()
             dm.setUniformCoordinates(0.0, Lx, 0.0, 1.0)
+        elif self.test == "cylinder_flow":
+            xmin = self.info.get("xmin", -8.0)
+            xmax = self.info.get("xmax", 12.0)
+            ymin = self.info.get("ymin", -5.0)
+            ymax = self.info.get("ymax",  5.0)
+            self.info["xmin"] = xmin
+            self.info["xmax"] = xmax
+            self.info["ymin"] = ymin
+            self.info["ymax"] = ymax
+            nx = self.bins
+            ny = self.bins
+            self.edges_x = np.linspace(xmin, xmax, nx + 1)
+            self.edges_y = np.linspace(ymin, ymax, ny + 1)
+            dm = PETSc.DMDA().create([nx + 1, ny + 1], dof=1, stencil_width=1, comm=self.comm)
+            dm.setUp()
+            dm.setUniformCoordinates(xmin, xmax, ymin, ymax)
         else:
             raise ValueError(f"Unknown test: {self.test}")
         return dm
