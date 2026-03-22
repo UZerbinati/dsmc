@@ -1,4 +1,5 @@
 from .cfm import CFMDSMC
+from .boltzmann import BoltzmannDSMC
 from petsc4py import PETSc
 from mpi4py import MPI
 

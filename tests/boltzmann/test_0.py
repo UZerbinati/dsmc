@@ -1,0 +1,59 @@
+"""
+Sod shock tube test — space-inhomogeneous Boltzmann with Maxwell molecules
+---------------------------------------------------------------------------
+Left state:  rho=1,     T=1.0  (x < 0.5)
+Right state: rho=0.125, T=0.8  (x > 0.5)
+
+Run with:
+    mpirun -n <P> python tests/boltzmann/test_0.py -nlocal 10000 -nsteps 200 \
+        -monitor_every 20 -bins 64 -nu 100 -dt 0.001
+"""
+import sys
+import petsc4py
+petsc4py.init(sys.argv)
+from petsc4py import PETSc
+from mpi4py import MPI
+from dsmc import BoltzmannDSMC, Print
+
+Opt = PETSc.Options()
+Print("Running space-inhomogeneous Maxwell-molecule DSMC (Sod shock tube):")
+
+nlocal = Opt.getReal("nlocal", 10000)
+nlocal = int(nlocal)
+bins = Opt.getInt("bins", 64)
+dt = Opt.getReal("dt", 0.001)
+nu = Opt.getReal("nu", 100)
+nsteps = Opt.getInt("nsteps", 200)
+seed = Opt.getInt("seed", 42)
+collision_type = Opt.getString("collision_type", "nanbu")
+extra_collision = Opt.getInt("extra_collision", 0) + 1
+monitor_every = Opt.getInt("monitor_every", 20)
+
+Print(f"  nlocal={nlocal}")
+Print(f"  nu={nu}")
+Print(f"  dt={dt}")
+Print(f"  collision ratio is {nu*dt}")
+Print(f"  bins={bins}")
+Print(f"  nsteps={nsteps}")
+Print(f"  seed={seed}")
+Print(f"  monitor_every={monitor_every}")
+Print(f"  extra_collision={extra_collision}")
+Print(f"  collision_type={collision_type}")
+Print("--------------------------------------------------------------------")
+
+sim = BoltzmannDSMC(
+    nlocal=nlocal,
+    nu=nu,
+    dt=dt,
+    bins=bins,
+    temperature=1.0,
+    mass=1.0,
+    extra_collision=extra_collision,
+    collision_type=collision_type,
+    seed=seed,
+    test="sod",
+    prefix="test_boltzmann_0",
+    comm=MPI.COMM_WORLD,
+)
+sim.run(nsteps=nsteps, monitor_every=monitor_every)
+Print("Simulation complete.")
