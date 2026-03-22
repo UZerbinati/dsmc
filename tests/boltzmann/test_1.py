@@ -20,7 +20,7 @@ Print("Running space-inhomogeneous Maxwell-molecule DSMC (Sod shock tube):")
 
 nlocal = Opt.getReal("nlocal", 1e7)
 nlocal = int(nlocal)
-bins = Opt.getInt("bins", 512)
+bins = Opt.getInt("bins", 256)
 dt = Opt.getReal("dt", 0.01)
 nu = Opt.getReal("nu", 100)
 nsteps = Opt.getInt("nsteps", 2000)
