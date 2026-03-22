@@ -47,8 +47,8 @@ from dsmc import BoltzmannDSMC, Print
 Opt = PETSc.Options()
 Print("Running 2D Boltzmann DSMC — flow past a cylinder (vortex shedding):")
 
-nlocal          = int(Opt.getReal("nlocal", 2e6))
-bins            = Opt.getInt("bins", 128)
+nlocal          = int(Opt.getReal("nlocal", 1e7))
+bins            = Opt.getInt("bins", 512)
 dt              = Opt.getReal("dt", 0.005)
 nu              = Opt.getReal("nu", 50.0)
 nsteps          = Opt.getInt("nsteps", 4000)
