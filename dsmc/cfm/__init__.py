@@ -10,14 +10,57 @@ import pickle
 
 class CFMDSMC:
     """
-    DSMC for space-inhomogeneous CFM kinetic equation.
+    DSMC solver for the homogeneous CFM (Carrillo–Farrell–Medaglia) kinetic
+    equation for oriented rigid rods.
 
-    Particles carry only velocity v in R^2.
-    Collisions are Bird/Nanbu-style random pair collisions with
-    isotropic post-collisional direction.
+    Each particle carries:
+      - translational velocity **v** ∈ R²
+      - orientation θ ∈ (0, 2π)
+      - angular velocity ω ∈ R
 
-    For Maxwell molecules, the collision kernel does not depend on |g|,
-    so pair selection is uniform.
+    Time stepping uses Strang splitting:
+      transport(dt/2) → Nanbu collision(s) → transport(dt/2).
+
+    The transport substep advances θ by ω·dt (plus an optional mean-field
+    Vlasov torque) and wraps the angle back onto (0, 2π).  The collision
+    substep performs rigid-rod impulse collisions: a random impact angle ψ
+    and random contact arm ℓ are drawn; pairs that are nearly parallel
+    fall back to a spherical-like collision.
+
+    Parameters
+    ----------
+    opts : dict
+        Simulation options.  Recognised keys:
+
+        - ``nlocal``          (int)   particles per MPI rank.
+        - ``nu``              (float) collision frequency; default 1.0.
+        - ``dt``              (float) time step; must satisfy dt ≤ 1/nu.
+        - ``bins``            (int)   histogram bins per axis; default 31.
+        - ``test``            (str)   initial condition: ``"uniform_angle"``
+                                      or ``"perturbed_uniform_angle"``.
+        - ``collision_type``  (str)   only ``"nanbu"`` is implemented.
+        - ``extra_collision`` (int)   collision sub-steps per time step; default 1.
+        - ``variance``        (str)   circular variance geometry: ``"circle"``
+                                      or ``"real_projective_plane"``; default ``"circle"``.
+        - ``seed``            (int)   RNG seed; default 1234.
+        - ``prefix``          (str)   path prefix for output directories.
+
+    info : dict
+        Physical parameters.  Required keys:
+
+        - ``mass``     (float) translational mass m.
+        - ``inertia``  (float) moment of inertia I.
+        - ``length``   (float) rod half-length L.
+
+        Optional keys: ``cutoff``, ``ev`` (translational restitution),
+        ``om`` (rotational restitution).
+
+    vlasov_force : callable or None
+        If provided, called as ``vlasov_force(angle)`` each transport
+        substep to add a mean-field torque to ω.
+
+    comm : MPI.Comm
+        MPI communicator; default ``MPI.COMM_WORLD``.
     """
 
     def __init__(
@@ -92,6 +135,7 @@ class CFMDSMC:
         
 
     def _create_mesh(self):
+        """Create a 1-D periodic DMDA over [0, 2π] (orientation space)."""
         nx = self.bins
         self.edges_x = np.linspace(0.0, 2*np.pi, nx + 1)
         dm = PETSc.DMDA().create([nx+1, 2], dof=1, stencil_width=1, comm=self.comm)
@@ -100,6 +144,7 @@ class CFMDSMC:
         return dm
 
     def _create_swarm(self):
+        """Create the DMSwarm and register particle fields (orientation, velocity, angular_velocity, weight)."""
         swarm = PETSc.DMSwarm().create(comm=self.comm)
         # For this use-case we only need DMSwarm as a generic particle container.
         # In most PETSc builds the BASIC type is appropriate here.
@@ -119,7 +164,7 @@ class CFMDSMC:
         return swarm
 
     def _construct_grid(self):
-
+        """Build histogram grid edges for velocity (vx, vy) and angular (θ, ω) spaces."""
         grid_x = np.linspace(-self.xlim, self.xlim, self.bins + 1)
         grid_y = np.linspace(-self.ylim, self.ylim, self.bins + 1)
         self.grid_x = grid_x
@@ -135,6 +180,23 @@ class CFMDSMC:
         self.delta_omega = (self.omega_max-self.omega_min)/(self.bins+1)
 
     def diagnostics(self, step=0):
+        """Compute and record global moments (called by all ranks).
+
+        Validates that all orientations remain in (0, 2π), then computes
+        total kinetic + rotational energy, mean translational and angular
+        momenta, temperature, and circular variance of θ via MPI allreduce.
+        Results are appended to ``self.history`` and serialised to disk by
+        rank 0.
+
+        Parameters
+        ----------
+        step : int
+            Current time-step index.
+
+        Returns
+        -------
+        dict with keys ``N``, ``mean_u``, ``temperature``, ``circular_var``.
+        """
         angle = self.swarm.getField("orientation")
         vel = self.swarm.getField("velocity")
         omega = self.swarm.getField("angular_velocity")
@@ -197,6 +259,22 @@ class CFMDSMC:
         }
 
     def maxwellian(self, step):
+        """Evaluate the Maxwellian distribution on the velocity-omega grid.
+
+        Uses the temperature and mean momenta recorded at ``step`` in
+        ``self.history`` to compute the 3-D Maxwellian on the
+        (vx, vy, ω) grid and its marginals along each axis.
+
+        Parameters
+        ----------
+        step : int
+            Index into ``self.history`` from which to read the moments.
+
+        Returns
+        -------
+        tuple ``(M, M_x, M_y, M_omega)`` where ``M`` is the full 3-D
+        distribution and the remaining entries are the marginals.
+        """
         vx, vy, omega = np.meshgrid(self.grid_x,self.grid_y, self.grid_omega)
         I = self.info["inertia"]
         m = self.info["mass"]
@@ -214,6 +292,20 @@ class CFMDSMC:
         return Maxwellian, Maxwellian_x, Maxwellian_y, Maxwellian_omega
 
     def run(self, nsteps: int, monitor_every: int = 10):
+        """Advance the simulation for ``nsteps`` time steps.
+
+        Each step uses Strang splitting:
+        ``transport(dt/2) → collision × extra_collision → transport(dt/2)``.
+        Diagnostics are computed every step; plots are written every
+        ``monitor_every`` steps and at the final step.
+
+        Parameters
+        ----------
+        nsteps : int
+            Number of time steps to run.
+        monitor_every : int
+            Write histogram plots every this many steps (default 10).
+        """
         d = self.diagnostics()
         if self.rank == 0:
             print(

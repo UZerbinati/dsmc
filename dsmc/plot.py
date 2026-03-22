@@ -5,6 +5,11 @@ from dsmc.utils import init_plot, pv_cmap
 
 
 def plot_history(self, prefix=""):
+    """Write time-history plots (temperature, energy, circular variance) to PDF/PNG.
+
+    One figure per quantity is saved as ``<prefix>_<quantity>.pdf/png``.
+    Only quantities present in ``self.history`` are plotted.
+    """
     time = np.array(self.history["step"]) * self.dt
 
     to_plot = []
@@ -34,6 +39,20 @@ def plot_history(self, prefix=""):
 # ---------------------------------------------------------------------------
 
 def plot_histograms(self, prefix=""):
+    """Write velocity and angular distribution plots to PDF/PNG (CFM solver).
+
+    All particle data are gathered to rank 0.  Saves:
+      - 2D velocity histogram     ``<prefix>_vel.pdf/png`` (+ pickle)
+      - vx marginal               ``<prefix>_vel_x.pdf/png``
+      - vy marginal               ``<prefix>_vel_y.pdf/png``
+      - 2D (θ, ω) histogram       ``<prefix>_angular.pdf/png`` (+ pickle)
+      - θ marginal                ``<prefix>_theta.pdf/png``
+      - ω marginal                ``<prefix>_omega.pdf/png``
+
+    Marginals are overlaid with the corresponding Maxwellian.
+    Only rank 0 writes files; all other ranks return immediately after
+    gathering.
+    """
     step = len(self.history["temperature"]) - 1
     if self.vlasov_force:
         Maxwellian = self.maxwellian(step)

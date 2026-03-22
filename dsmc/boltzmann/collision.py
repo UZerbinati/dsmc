@@ -52,6 +52,14 @@ def nanbu_collision_step(self):
 
 
 def bgk_collision_step(self):
+    """BGK relaxation step (per-cell).
+
+    Each cell's particle velocities are replaced by samples drawn from the
+    local Maxwellian (a Gaussian with the cell's mean velocity and
+    temperature).  The sample is adjusted twice so that the cell mean
+    velocity and mean kinetic energy match the pre-collision values exactly,
+    enforcing discrete conservation of momentum and energy.
+    """
     cells = _get_particle_cells(self)
     cell_lists = _build_cell_lists(cells)
     vel = self.swarm.getField("velocity")

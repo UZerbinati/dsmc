@@ -1,11 +1,11 @@
 """
-Sod shock tube test — space-inhomogeneous Boltzmann with Maxwell molecules
----------------------------------------------------------------------------
+Sod shock tube — Nanbu, nu=100 (higher collision frequency than test_0)
+-----------------------------------------------------------------------
 Left state:  rho=1,     T=1.0  (x < 0.5)
 Right state: rho=0.125, T=0.8  (x > 0.5)
 
 Run with:
-    mpirun -n <P> python tests/boltzmann/test_0.py -nlocal 10000 -nsteps 200 \
+    mpirun -n <P> python tests/boltzmann/test_1.py -nlocal 10000 -nsteps 200 \
         -monitor_every 20 -bins 64 -nu 100 -dt 0.001
 """
 import sys

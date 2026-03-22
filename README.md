@@ -10,13 +10,17 @@ Space-inhomogeneous Boltzmann equation with Maxwell molecules.
 Particles carry 2D velocity and live in a spatial domain; transport and
 per-cell collisions are split with Strang splitting.
 
-| Test | Description |
-|---|---|
-| `sod` | Sod shock tube on [0, 1] |
-| `cylinder_flow` | 2D flow past a circular cylinder (periodic in x, specular walls) |
+| Test file | IC / collision | Description |
+|---|---|---|
+| `test_0` | sod / Nanbu, ν=10 | Sod shock tube baseline |
+| `test_1` | sod / Nanbu, ν=100 | Higher collision frequency |
+| `test_2` | sod / Nanbu, ν=100, 100 sub-steps | Many extra collision sub-steps |
+| `test_3` | sod / BGK | Sod shock tube with BGK relaxation |
+| `test_4` | cylinder_flow / Nanbu | 2D flow past a circular cylinder (laminar, Re~15) |
+| `test_5` | cylinder_flow / Nanbu | Vortex shedding regime (Re~150, von Kármán street) |
 
 ### `CFMDSMC`
-Homogeneous CFM (Carrillo–Favre–Marchetti) kinetic equation for oriented rigid
+Homogeneous CFM (Carrillo–Farrell–Medaglia) kinetic equation for oriented rigid
 rods.  Each particle carries translational velocity **v**, orientation
 θ ∈ [0, 2π), and angular velocity ω.  An optional mean-field (Vlasov) force
 acts on ω.
@@ -74,7 +78,7 @@ dsmc/
   plot.py       Plotting: spatial observables, histograms, time histories
   utils.py      Shared PETSc/MPI helpers and Matplotlib style defaults
 tests/
-  boltzmann/    test_0–2 (Sod shock tube), test_3 (cylinder flow)
+  boltzmann/    test_0–2 (Sod shock tube, Nanbu), test_3 (Sod, BGK), test_4–5 (cylinder flow)
   cfm/          test_0–14
 ```
 

@@ -1,10 +1,27 @@
 import numpy as np
 
 def _sample_angle(self, m: int):
+    """Sample m impact angles ψ uniformly on [0, 2π)."""
     Theta = self.rng.uniform(size=(m, 1)) * 2 * np.pi
     return Theta
 
 def nanbu_collision_step(self):
+    """Rigid-rod Nanbu collision step.
+
+    Selects Mcol = floor(nu * N * dt / 2) random collision pairs (uniform
+    permutation).  For each pair:
+
+    1. A random impact angle ψ and contact arm ℓ are drawn.
+    2. The relative contact velocity V and impulse J are computed from the
+       rigid-body equations with restitution coefficients ev (translational)
+       and eom (rotational).
+    3. Post-collisional velocities (vi', vj') and angular velocities
+       (ωi', ωj') are updated.
+
+    Pairs whose orientation difference |θi - θj| < cutoff are nearly
+    parallel; these fall back to a spherical-like head-on collision to
+    avoid numerical instability from the near-singular denominator.
+    """
     vel = self.swarm.getField("velocity").reshape(self.nlocal, self.dim)
     theta = self.swarm.getField("orientation").reshape(self.nlocal)
     omega = self.swarm.getField("angular_velocity").reshape(self.nlocal)

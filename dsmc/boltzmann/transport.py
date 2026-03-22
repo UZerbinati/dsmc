@@ -59,6 +59,19 @@ def _apply_cylinder_flow_bc(X, V, info):
 
 
 def transport_step(self, dt):
+    """Advance all particles by free streaming for time ``dt``.
+
+    Positions are updated as X += V * dt along the effective spatial
+    dimensions (1-D for ``sod``, 2-D for ``cylinder_flow``).  Boundary
+    conditions are then applied (reflective walls / periodic wrap / cylinder
+    specular reflection) before particles are migrated to their new owning
+    ranks via ``DMSwarm.migrate``.
+
+    Parameters
+    ----------
+    dt : float
+        Time interval for the free-streaming substep.
+    """
     self.swarm.sortGetAccess()
     celldm = self.swarm.getCellDMActive()
     coord_names = celldm.getCoordinateFields()
