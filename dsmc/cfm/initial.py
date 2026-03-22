@@ -21,12 +21,14 @@ def _sample_perturbed_positions_1d(self, N):
     # same normalization as in MATLAB
     cell_area = fx * deltas / (2.0 * np.pi / k)
 
-    N_cell = np.round(cell_area * N).astype(np.int64)
-
-    if N_cell.sum() != N:
-        raise ValueError(
-            f"Particle count mismatch: sum(N_cell)={N_cell.sum()} but N={N}"
-        )
+    counts = cell_area * N
+    N_cell = np.floor(counts).astype(np.int64)
+    remainder = N - N_cell.sum()
+    if remainder > 0:
+        fracs = counts - N_cell
+        top_up = self.rng.choice(len(N_cell), size=int(remainder), replace=False,
+                                 p=fracs / fracs.sum())
+        N_cell[top_up] += 1
 
     sample = np.empty(N)
 
