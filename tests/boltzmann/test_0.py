@@ -18,11 +18,11 @@ from dsmc import BoltzmannDSMC, Print
 Opt = PETSc.Options()
 Print("Running space-inhomogeneous Maxwell-molecule DSMC (Sod shock tube):")
 
-nlocal = Opt.getReal("nlocal", 10000)
+nlocal = Opt.getReal("nlocal", 1e7)
 nlocal = int(nlocal)
-bins = Opt.getInt("bins", 64)
-dt = Opt.getReal("dt", 0.001)
-nu = Opt.getReal("nu", 100)
+bins = Opt.getInt("bins", 512)
+dt = Opt.getReal("dt", 0.01)
+nu = Opt.getReal("nu", 10)
 nsteps = Opt.getInt("nsteps", 200)
 seed = Opt.getInt("seed", 42)
 collision_type = Opt.getString("collision_type", "nanbu")
@@ -52,7 +52,7 @@ sim = BoltzmannDSMC(
     collision_type=collision_type,
     seed=seed,
     test="sod",
-    prefix="test_boltzmann_0",
+    prefix="output/test_0",
     comm=MPI.COMM_WORLD,
 )
 sim.run(nsteps=nsteps, monitor_every=monitor_every)

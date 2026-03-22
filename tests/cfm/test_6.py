@@ -71,7 +71,7 @@ sim = CFMDSMC(
     vlasov_force = vlasov_force,
     seed=seed,
     test="uniform_angle",
-    prefix="test_6",
+    prefix="output/test_6",
     comm=MPI.COMM_WORLD,
 )
 sim.run(nsteps=nsteps, monitor_every=monitor_every)

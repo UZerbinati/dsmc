@@ -94,8 +94,8 @@ def vlasov_force(theta):
             spine.set_linewidth(0.8)
         ax.tick_params(which="both", direction="in", top=True, right=True)
         fig.tight_layout(pad=0.2)
-        fig.savefig(f"test_15_output_cfm_nanbu/vlasov_energy.pdf", bbox_inches="tight")
-        fig.savefig(f"test_15_output_cfm_nanbu/vlasov_energy.png", dpi=400, bbox_inches="tight")
+        fig.savefig(f"output/test_15_output_cfm_nanbu/vlasov_energy.pdf", bbox_inches="tight")
+        fig.savefig(f"output/test_15_output_cfm_nanbu/vlasov_energy.png", dpi=400, bbox_inches="tight")
         plt.close(fig)
     return (L**2)*force.reshape(force.shape[0],1)
 
@@ -112,7 +112,7 @@ sim = CFMDSMC(
     seed=seed,
     test="perturbed_uniform_angle",
     variance="real_projective_plane", 
-    prefix="test_15",
+    prefix="output/test_15",
     comm=MPI.COMM_WORLD,
 )
 sim.run(nsteps=nsteps, monitor_every=monitor_every)

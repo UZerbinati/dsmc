@@ -80,7 +80,7 @@ sim = CFMDSMC(
     seed=seed,
     test="uniform_angle",
     variance="real_projective_plane", 
-    prefix="test_12",
+    prefix="output/test_12",
     comm=MPI.COMM_WORLD,
 )
 sim.run(nsteps=nsteps, monitor_every=monitor_every)

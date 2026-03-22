@@ -56,7 +56,7 @@ sim = CFMDSMC(
     collision_type=collision_type,
     seed=seed,
     test="uniform_angle",
-    prefix="test_0",
+    prefix="output/test_0",
     comm=MPI.COMM_WORLD,
 )
 sim.run(nsteps=nsteps, monitor_every=monitor_every)
