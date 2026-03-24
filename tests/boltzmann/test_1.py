@@ -23,11 +23,11 @@ nlocal = int(nlocal)
 bins = Opt.getInt("bins", 256)
 dt = Opt.getReal("dt", 0.01)
 nu = Opt.getReal("nu", 100)
-nsteps = Opt.getInt("nsteps", 2000)
+nsteps = Opt.getInt("nsteps", 200)
 seed = Opt.getInt("seed", 42)
 collision_type = Opt.getString("collision_type", "nanbu")
 extra_collision = Opt.getInt("extra_collision", 0) + 1
-monitor_every = Opt.getInt("monitor_every", 20)
+monitor_every = Opt.getInt("monitor_every", 5)
 
 Print(f"  nlocal={nlocal}")
 Print(f"  nu={nu}")

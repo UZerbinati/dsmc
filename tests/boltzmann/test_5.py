@@ -55,7 +55,7 @@ nsteps          = Opt.getInt("nsteps", 4000)
 seed            = Opt.getInt("seed", 42)
 collision_type  = Opt.getString("collision_type", "nanbu")
 extra_collision = Opt.getInt("extra_collision", 0) + 1
-monitor_every   = Opt.getInt("monitor_every", 100)
+monitor_every   = Opt.getInt("monitor_every", 10)
 inflow_velocity = Opt.getReal("inflow_velocity", 1.5)
 cylinder_radius = Opt.getReal("cylinder_radius", 1.0)
 

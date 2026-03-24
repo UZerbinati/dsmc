@@ -9,19 +9,19 @@ import petsc4py
 petsc4py.init(sys.argv)
 from petsc4py import PETSc
 from mpi4py import MPI
-from dsmc import CFMDSMC, Print
+from dsmc import CFMZNeedleDSMC, Print
 import numpy as np
 
 Opt = PETSc.Options()
-Print("Running homogeneous CFM DSMC with options:")
+Print("Running homogeneous CFMZ needle DSMC with options:")
 
 nlocal = Opt.getReal("nlocal", 1e7)
 nlocal = int(nlocal)
 bins = Opt.getInt("bins", 256)
 dt = Opt.getReal("dt", 0.01)
-nu = Opt.getReal("nu", 100)
+nu = Opt.getReal("nu", 10)
 nsteps = Opt.getInt("nsteps", 2000)
-seed = Opt.getInt("seed", 47)
+seed = Opt.getInt("seed", 49)
 grazing_collision = Opt.getBool("grazing_collision", False)
 collision_type = Opt.getString("collision_type", "nanbu")
 extra_collision = Opt.getInt("extra_collision", 0)+1
@@ -49,6 +49,7 @@ info = {"inertia": 1.0,
         "om": 1.0,       # rotational restitution
         "cutoff": 0.1,   # angular cutoff
        }
+
 comm = MPI.COMM_WORLD
 def vlasov_force(theta):
     local_nu_x = np.sum(np.cos(theta))
@@ -68,9 +69,9 @@ opts = {
     "collision_type": collision_type,
     "seed": seed,
     "test": "uniform_angle",
-    "prefix": "output/test_7",
+    "prefix": "output/test_6",
 }
-sim = CFMDSMC(
+sim = CFMZNeedleDSMC(
     opts=opts,
     info=info,
     vlasov_force=vlasov_force,

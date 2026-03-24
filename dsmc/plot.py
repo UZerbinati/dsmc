@@ -35,11 +35,11 @@ def plot_history(self, prefix=""):
 
 
 # ---------------------------------------------------------------------------
-# CFM-specific
+# CFMZ-specific
 # ---------------------------------------------------------------------------
 
 def plot_histograms(self, prefix=""):
-    """Write velocity and angular distribution plots to PDF/PNG (CFM solver).
+    """Write velocity and angular distribution plots to PDF/PNG (CFMZ needle solver).
 
     All particle data are gathered to rank 0.  Saves:
       - 2D velocity histogram     ``<prefix>_vel.pdf/png`` (+ pickle)

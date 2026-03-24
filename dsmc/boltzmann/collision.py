@@ -60,8 +60,8 @@ def bgk_collision_step(self):
     velocity and mean kinetic energy match the pre-collision values exactly,
     enforcing discrete conservation of momentum and energy.
     """
-    cells = _get_particle_cells(self)
-    cell_lists = _build_cell_lists(cells)
+    cells = get_particle_cells(self)
+    cell_lists = build_cell_lists(cells)
     vel = self.swarm.getField("velocity")
 
     for cell, plist in cell_lists.items():

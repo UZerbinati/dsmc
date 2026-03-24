@@ -9,16 +9,15 @@ import petsc4py
 petsc4py.init(sys.argv)
 from petsc4py import PETSc
 from mpi4py import MPI
-from dsmc import CFMDSMC, Print
+from dsmc import CFMZNeedleDSMC, Print
 import numpy as np
-import matplotlib.pyplot as plt
 
 Opt = PETSc.Options()
-Print("Running homogeneous CFM DSMC with options:")
+Print("Running homogeneous CFMZ needle DSMC with options:")
 
-nlocal = Opt.getReal("nlocal", 1e6)
+nlocal = Opt.getReal("nlocal", 1e7)
 nlocal = int(nlocal)
-bins = Opt.getInt("bins", 128)
+bins = Opt.getInt("bins", 256)
 dt = Opt.getReal("dt", 0.01)
 nu = Opt.getReal("nu", 10)
 nsteps = Opt.getInt("nsteps", 2000)
@@ -45,7 +44,7 @@ Print("--------------------------------------------------------------------")
 #TODO: Fix with correct relation between length mass and inertia
 info = {"inertia": 1.0,
         "mass": 1.0,
-        "length": np.sqrt(12.0),
+        "length": 1.0,
         "ev": 1.0,       # translational restitution
         "om": 1.0,       # rotational restitution
         "cutoff": 0.1,   # angular cutoff
@@ -53,49 +52,15 @@ info = {"inertia": 1.0,
         "initial_angle_shift": -0.3, #amplitude perturbation from uniform for initial angle distribution
         "initial_angle_wavelength": 1, #amplitude perturbation from uniform for initial angle distribution
        }
-vlasov_energy_history = []
-vlasov_interpolant_mesh = np.linspace(0, 2*np.pi, bins)
-def hat_interpolant(x,y, mesh):
-    hat = lambda t: 1-np.abs(t)
-    interpolant = y[...,None]*hat(x[...,None][:,0]-mesh)
-    interpolant = (1/interpolant.shape[0])*interpolant
-    return np.sum(interpolant, axis=0)
 
 comm = MPI.COMM_WORLD
 def vlasov_force(theta):
-    hist, theta_edges = np.histogram(theta, bins=bins)
-    hist = comm.allreduce(hist, op=MPI.SUM)
-    delta_theta = 2*np.pi/(bins+1)
-    normalisation = np.sum(hist)*delta_theta
-    hist = hist/normalisation
-    L = info["length"]
-    centers = 0.5 * (theta_edges[:-1] + theta_edges[1:])
-    np.sin(theta[...,None]-centers)
-    B = np.sign(np.sin(theta[...,None][:,0]-centers))
-    A = np.cos(theta[...,None][:,0]-centers)
-    force = -np.sum(A*B*hist, axis=1)*delta_theta
-    if comm.Get_rank() == 0:
-        vlasov_interpolant = hat_interpolant(theta, force, vlasov_interpolant_mesh)
-        vlasov_energy_history.append(np.sqrt(np.sum(np.abs(vlasov_interpolant)**2) \
-                                    /vlasov_interpolant_mesh[1]-vlasov_interpolant_mesh[0])
-                                    )
-        fig, ax = plt.subplots(figsize=(5.5, 3.2))
-        time = np.array(range(len(vlasov_energy_history)))*dt
-        ax.plot(time,
-            vlasov_energy_history,
-            color="black",
-            linewidth=1.5,
-        )
-        ax.set_xlabel(r"$t$")
-        ax.set_ylabel(r"$|\mathcal{V}(\theta)|$")
-        for spine in ax.spines.values():
-            spine.set_linewidth(0.8)
-        ax.tick_params(which="both", direction="in", top=True, right=True)
-        fig.tight_layout(pad=0.2)
-        fig.savefig(f"output/test_14/vlasov_energy.pdf", bbox_inches="tight")
-        fig.savefig(f"output/test_14/vlasov_energy.png", dpi=400, bbox_inches="tight")
-        plt.close(fig)
-    return (L**2)*force.reshape(force.shape[0],1)
+    local_nu_x = np.sum(np.cos(theta))
+    local_nu_y = np.sum(np.sin(theta))
+    global_nu_x = comm.allreduce(local_nu_x, op=MPI.SUM)
+    global_nu_y = comm.allreduce(local_nu_y, op=MPI.SUM)
+    angle_av = (np.arctan2(global_nu_y, global_nu_x) + 2*np.pi) % (2*np.pi)
+    return -np.sin(theta-angle_av)
 
 opts = {
     "nlocal": nlocal,
@@ -107,10 +72,9 @@ opts = {
     "collision_type": collision_type,
     "seed": seed,
     "test": "perturbed_uniform_angle",
-    "variance": "real_projective_plane",
-    "prefix": "output/test_14",
+    "prefix": "output/test_5",
 }
-sim = CFMDSMC(
+sim = CFMZNeedleDSMC(
     opts=opts,
     info=info,
     vlasov_force=vlasov_force,

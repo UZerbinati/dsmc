@@ -9,11 +9,11 @@ import petsc4py
 petsc4py.init(sys.argv)
 from petsc4py import PETSc
 from mpi4py import MPI
-from dsmc import CFMDSMC, Print
+from dsmc import CFMZNeedleDSMC, Print
 import numpy as np
 
 Opt = PETSc.Options()
-Print("Running homogeneous CFM DSMC with options:")
+Print("Running homogeneous CFMZ needle DSMC with options:")
 
 nlocal = Opt.getReal("nlocal", 1e7)
 nlocal = int(nlocal)
@@ -48,11 +48,7 @@ info = {"inertia": 1.0,
         "ev": 1.0,       # translational restitution
         "om": 1.0,       # rotational restitution
         "cutoff": 0.1,   # angular cutoff
-        "initial_angle_amplitude": 1e-1, #amplitude perturbation from uniform for initial angle distribution
-        "initial_angle_shift": -0.3, #amplitude perturbation from uniform for initial angle distribution
-        "initial_angle_wavelength": 1, #amplitude perturbation from uniform for initial angle distribution
        }
-
 comm = MPI.COMM_WORLD
 def vlasov_force(theta):
     local_nu_x = np.sum(np.cos(theta))
@@ -60,7 +56,7 @@ def vlasov_force(theta):
     global_nu_x = comm.allreduce(local_nu_x, op=MPI.SUM)
     global_nu_y = comm.allreduce(local_nu_y, op=MPI.SUM)
     angle_av = (np.arctan2(global_nu_y, global_nu_x) + 2*np.pi) % (2*np.pi)
-    return -np.sin(theta-angle_av)
+    return -4*(theta-angle_av)
 
 opts = {
     "nlocal": nlocal,
@@ -71,10 +67,10 @@ opts = {
     "grazing_collision": grazing_collision,
     "collision_type": collision_type,
     "seed": seed,
-    "test": "perturbed_uniform_angle",
-    "prefix": "output/test_5",
+    "test": "uniform_angle",
+    "prefix": "output/test_3",
 }
-sim = CFMDSMC(
+sim = CFMZNeedleDSMC(
     opts=opts,
     info=info,
     vlasov_force=vlasov_force,

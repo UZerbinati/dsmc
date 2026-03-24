@@ -1,19 +1,15 @@
 """
-Test with with Vlasov force
-----------------------------
-Here we consdier a quadratic potential reuslting in the Valsov force
-V = -alpha(theta-theta_av)
+Test with no Vlasov force
 """
 import sys
 import petsc4py
 petsc4py.init(sys.argv)
 from petsc4py import PETSc
 from mpi4py import MPI
-from dsmc import CFMDSMC, Print
-import numpy as np
+from dsmc import CFMZNeedleDSMC, Print
 
 Opt = PETSc.Options()
-Print("Running homogeneous CFM DSMC with options:")
+Print("Running homogeneous CFMZ needle DSMC with options:")
 
 nlocal = Opt.getReal("nlocal", 1e7)
 nlocal = int(nlocal)
@@ -49,16 +45,6 @@ info = {"inertia": 1.0,
         "om": 1.0,       # rotational restitution
         "cutoff": 0.1,   # angular cutoff
        }
-
-comm = MPI.COMM_WORLD
-def vlasov_force(theta):
-    local_nu_x = np.sum(np.cos(theta))
-    local_nu_y = np.sum(np.sin(theta))
-    global_nu_x = comm.allreduce(local_nu_x, op=MPI.SUM)
-    global_nu_y = comm.allreduce(local_nu_y, op=MPI.SUM)
-    angle_av = (np.arctan2(global_nu_y, global_nu_x) + 2*np.pi) % (2*np.pi)
-    return -(theta-angle_av)
-
 opts = {
     "nlocal": nlocal,
     "nu": nu,
@@ -69,12 +55,11 @@ opts = {
     "collision_type": collision_type,
     "seed": seed,
     "test": "uniform_angle",
-    "prefix": "output/test_2",
+    "prefix": "output/test_1",
 }
-sim = CFMDSMC(
+sim = CFMZNeedleDSMC(
     opts=opts,
     info=info,
-    vlasov_force=vlasov_force,
     comm=MPI.COMM_WORLD,
 )
 sim.run(nsteps=nsteps, monitor_every=monitor_every)

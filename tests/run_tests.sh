@@ -35,7 +35,7 @@ run_test() {
     echo
 }
 
-for t in cfm/test_*.py; do
+for t in cfmz/test_*.py; do
     run_test "$t"
 done
 

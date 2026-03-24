@@ -27,7 +27,7 @@ nsteps = Opt.getInt("nsteps", 2000)
 seed = Opt.getInt("seed", 42)
 collision_type = Opt.getString("collision_type", "bgk")
 extra_collision = Opt.getInt("extra_collision", 0) + 1
-monitor_every = Opt.getInt("monitor_every", 20)
+monitor_every = Opt.getInt("monitor_every", 5)
 
 Print(f"  nlocal={nlocal}")
 Print(f"  nu={nu}")
