@@ -1,8 +1,8 @@
 """
-Test with with Vlasov force
-----------------------------
-Here we consdier a quadratic potential reuslting in the Valsov force
-V = -alpha(theta-theta_av)
+Kuramoto meanfield Vlasov force, alternative seed
+--------------------------------------------------
+Mean-field torque: F(θ) = −sin(θ − θ_av).  Identical to test_4 but
+with seed=49 for reproducibility checks.
 """
 import sys
 import petsc4py
@@ -25,7 +25,7 @@ seed = Opt.getInt("seed", 49)
 grazing_collision = Opt.getBool("grazing_collision", False)
 collision_type = Opt.getString("collision_type", "nanbu")
 extra_collision = Opt.getInt("extra_collision", 0)+1
-monitor_every = Opt.getInt("monitor_every", 10)
+monitor_every = Opt.getInt("monitor_every", 100)
 
 Print(f"  nlocal={nlocal}")
 Print(f"  nu={nu}")

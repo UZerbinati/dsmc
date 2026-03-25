@@ -44,6 +44,8 @@ class CFMZNeedleDSMC:
                                       or ``"real_projective_plane"``; default ``"circle"``.
         - ``seed``            (int)   RNG seed; default 1234.
         - ``prefix``          (str)   path prefix for output directories.
+        - ``transport``       (bool)  if ``False`` the transport substep is
+                                      skipped entirely (pure collision); default ``True``.
 
     info : dict
         Physical parameters.  Required keys:
@@ -57,7 +59,19 @@ class CFMZNeedleDSMC:
 
     vlasov_force : callable or None
         If provided, called as ``vlasov_force(angle)`` each transport
-        substep to add a mean-field torque to ω.
+        substep to add a mean-field torque to ω.  For the Onsager
+        potential W(θ₁,θ₂) = |sin(θ₁−θ₂)| the torque is
+        F(θ) = −L² ∫ sign(sin(θ−θ')) cos(θ−θ') ρ(θ') dθ'.
+
+    interaction_energy : callable or None
+        If provided, called as ``interaction_energy(angle)`` once per
+        time step inside ``diagnostics`` to compute the mean-field
+        interaction energy
+        E[ρ] = ∫∫ W(θ₁,θ₂) ρ(θ₁) ρ(θ₂) dθ₁ dθ₂.
+        The callable must handle its own MPI allreduce and return a
+        global scalar.  When set, ``history["interaction_energy"]`` and
+        ``history["total_energy"]`` (= kinetic + E[ρ]) are recorded and
+        plotted alongside the other time-history quantities.
 
     comm : MPI.Comm
         MPI communicator; default ``MPI.COMM_WORLD``.
@@ -68,6 +82,7 @@ class CFMZNeedleDSMC:
         opts: dict,
         info: dict = {},
         vlasov_force=None,
+        interaction_energy=None,
         comm: MPI.Comm = MPI.COMM_WORLD,
     ):
         self.comm = comm
@@ -91,6 +106,8 @@ class CFMZNeedleDSMC:
         self.grazing_collision = opts.get("grazing_collision", False)
         self.collision_type = opts.get("collision_type", "nanbu")
         self.vlasov_force = vlasov_force
+        self.interaction_energy = interaction_energy
+        self.transport = opts.get("transport", True)
         self.dump = "hist"
 
 
@@ -107,8 +124,11 @@ class CFMZNeedleDSMC:
             "momentum_1": [],
             "momentum_2": [],
             "ang_momentum": [],
-            "circular_var": []
+            "circular_var": [],
         }
+        if interaction_energy is not None:
+            self.history["interaction_energy"] = []
+            self.history["total_energy"] = []
 
         self.output_path = f'{self.prefix}_output_cfmz_{self.collision_type}'
         if self.rank == 0:
@@ -238,6 +258,10 @@ class CFMZNeedleDSMC:
         self.history["step"].append(step)
         self.history["temperature"].append(temp)
         self.history["energy"].append(global_energy)
+        if self.interaction_energy is not None:
+            E_int = self.interaction_energy(angle)
+            self.history["interaction_energy"].append(E_int)
+            self.history["total_energy"].append(global_energy + E_int)
         self.history["momentum_1"].append(np.linalg.norm(mean_u[0]))
         self.history["momentum_2"].append(np.linalg.norm(mean_u[1]))
         self.history["ang_momentum"].append(np.linalg.norm(mean_eta))
@@ -318,13 +342,15 @@ class CFMZNeedleDSMC:
         self._construct_grid()
         self.plot_histograms(prefix=f"{self.output_path}/dsmc_0")
         for step in range(1, nsteps + 1):
-            self.transport_step(dt=0.5*self.dt)
+            if self.transport:
+                self.transport_step(dt=0.5*self.dt)
             for coll_index in range(self.extra_collision):
                 if self.collision_type == "nanbu":
                     self.nanbu_collision_step()
                 else:
                     raise ValueError(f"Unknown collision type: {self.collision_type}")
-            self.transport_step(dt=0.5*self.dt)
+            if self.transport:
+                self.transport_step(dt=0.5*self.dt)
             d = self.diagnostics(step=step)
             if self.rank == 0:
                 print(

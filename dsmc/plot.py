@@ -16,7 +16,11 @@ def plot_history(self, prefix=""):
     if "temperature" in self.history:
         to_plot.append((self.history["temperature"], r"$T$", "_temperature"))
     if "energy" in self.history:
-        to_plot.append((self.history["energy"], r"$E$", "_energy"))
+        to_plot.append((self.history["energy"], r"$E_{\mathrm{kin}}$", "_energy"))
+    if "interaction_energy" in self.history:
+        to_plot.append((self.history["interaction_energy"], r"$\mathcal{E}[\rho]$", "_interaction_energy"))
+    if "total_energy" in self.history:
+        to_plot.append((self.history["total_energy"], r"$E_{\mathrm{kin}} + \mathcal{E}[\rho]$", "_total_energy"))
     if "circular_var" in self.history:
         to_plot.append((self.history["circular_var"], r"$\mathrm{Var}(\theta)$", "_variance"))
 

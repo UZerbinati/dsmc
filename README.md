@@ -25,10 +25,28 @@ needle-like (oriented rigid rod) systems.  Each particle carries translational
 velocity **v**, orientation θ ∈ [0, 2π), and angular velocity ω.  An optional
 mean-field (Vlasov) force acts on ω.
 
-| Test | Description |
-|---|---|
-| `uniform_angle` | Angles drawn uniformly from [0, 2π) |
-| `perturbed_uniform_angle` | Angles drawn from 1 + A cos(kθ) |
+Tests 8–14 use the **Onsager potential** W(θ₁,θ₂) = |sin(θ₁−θ₂)|, which gives
+the Vlasov torque F(θ) = −L² ∫ sign(sin(θ−θ')) cos(θ−θ') ρ(θ') dθ'.  The
+interaction energy E[ρ] = ∫∫ W ρ ρ dθ₁ dθ₂ and the total energy
+E_kin + E[ρ] are tracked and plotted alongside the kinetic observables.
+
+| Test | IC | Vlasov force F(θ) | Notes |
+|---|---|---|---|
+| `test_0` | uniform | — | Pure collision, **no transport** |
+| `test_1` | uniform | — | Baseline: collision + transport, ν=10 |
+| `test_2` | uniform | −(θ−θ_av) | Quadratic, α=1 |
+| `test_3` | uniform | −4(θ−θ_av) | Quadratic, α=4 |
+| `test_4` | uniform | −sin(θ−θ_av) | Kuramoto meanfield |
+| `test_5` | perturbed | −sin(θ−θ_av) | Kuramoto meanfield, perturbed IC |
+| `test_6` | uniform | −sin(θ−θ_av) | Kuramoto meanfield, seed=49 |
+| `test_7` | uniform | — | No force, high ν=100 |
+| `test_8` | uniform | Onsager | ν=10, bins=256 |
+| `test_9` | uniform | Onsager | ν=1, bins=128 |
+| `test_10` | uniform | Onsager | ν=100, bins=128 |
+| `test_11` | uniform | Onsager | ν=1, bins=128 |
+| `test_12` | uniform | Onsager | ν=10, bins=256 |
+| `test_13` | uniform | Onsager | ν=10, bins=128, **no collisions** (pure Vlasov-transport) |
+| `test_14` | perturbed | Onsager | ν=10, bins=128, perturbed IC |
 
 ## Dependencies
 
@@ -90,5 +108,5 @@ Each test writes output to `output/<prefix>_output_<solver>_<collision_type>/`:
 |---|---|
 | `dsmc_<step>_*.pdf/png` | Spatial or velocity-space snapshots |
 | `dsmc_*_temperature/energy.pdf` | Time-history plots |
-| `history.pickle` | Python dict with arrays: `step`, `temperature`, `energy`, `momentum_1/2`, … |
+| `history.pickle` | Python dict with arrays: `step`, `temperature`, `energy` (kinetic), `interaction_energy`, `total_energy`, `momentum_1/2`, … |
 | `dsmc_<step>_observables.pickle` | Spatial field arrays for post-processing |

@@ -1,8 +1,9 @@
 """
-Test with with Vlasov force
+Quadratic Vlasov force, α=1
 ----------------------------
-Here we consdier a quadratic potential reuslting in the Valsov force
-V = -alpha(theta-theta_av)
+Mean-field torque: F(θ) = −(θ − θ_av), where θ_av is the mean
+orientation angle computed via circular statistics.  Models a quadratic
+confinement towards the mean field with strength α=1.
 """
 import sys
 import petsc4py
@@ -25,7 +26,7 @@ seed = Opt.getInt("seed", 47)
 grazing_collision = Opt.getBool("grazing_collision", False)
 collision_type = Opt.getString("collision_type", "nanbu")
 extra_collision = Opt.getInt("extra_collision", 0)+1
-monitor_every = Opt.getInt("monitor_every", 10)
+monitor_every = Opt.getInt("monitor_every", 100)
 
 Print(f"  nlocal={nlocal}")
 Print(f"  nu={nu}")

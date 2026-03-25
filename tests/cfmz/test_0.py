@@ -1,5 +1,9 @@
 """
-Test with no Vlasov force
+Pure collision test — no Vlasov force, no transport
+----------------------------------------------------
+Transport is disabled (``transport=False``) so only the Nanbu collision
+operator acts.  This isolates the equilibration of the velocity and
+angular-velocity distributions under collisions alone.
 """
 import sys
 import petsc4py
@@ -21,7 +25,7 @@ seed = Opt.getInt("seed", 47)
 grazing_collision = Opt.getBool("grazing_collision", False)
 collision_type = Opt.getString("collision_type", "nanbu")
 extra_collision = Opt.getInt("extra_collision", 0)+1
-monitor_every = Opt.getInt("monitor_every", 10)
+monitor_every = Opt.getInt("monitor_every", 100)
 
 Print(f"  nlocal={nlocal}")
 Print(f"  nu={nu}")
@@ -55,6 +59,7 @@ opts = {
     "collision_type": collision_type,
     "seed": seed,
     "test": "uniform_angle",
+    "transport": False,
     "prefix": "output/test_0",
 }
 sim = CFMZNeedleDSMC(

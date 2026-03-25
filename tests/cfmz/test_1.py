@@ -1,5 +1,8 @@
 """
-Test with no Vlasov force
+Baseline: collision + transport, no Vlasov force
+-------------------------------------------------
+Uniform initial angle distribution, ν=10.  Serves as the comparison
+case for test_0 (pure collision) to isolate the effect of transport.
 """
 import sys
 import petsc4py
@@ -21,7 +24,7 @@ seed = Opt.getInt("seed", 47)
 grazing_collision = Opt.getBool("grazing_collision", False)
 collision_type = Opt.getString("collision_type", "nanbu")
 extra_collision = Opt.getInt("extra_collision", 0)+1
-monitor_every = Opt.getInt("monitor_every", 10)
+monitor_every = Opt.getInt("monitor_every", 100)
 
 Print(f"  nlocal={nlocal}")
 Print(f"  nu={nu}")

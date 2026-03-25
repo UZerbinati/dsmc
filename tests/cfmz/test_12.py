@@ -1,8 +1,12 @@
 """
-Test with with Vlasov force
-----------------------------
-Here we consdier a quadratic potential reuslting in the Valsov force
-V = -alpha(theta-theta_av)
+Test with Vlasov force — Onsager potential
+------------------------------------------
+Mean-field interaction potential: W(θ₁, θ₂) = |sin(θ₁ − θ₂)|  (Onsager).
+
+The Vlasov torque on a particle at θ is
+    F(θ) = −L² ∫ sign(sin(θ−θ')) cos(θ−θ') ρ(θ') dθ'
+and the interaction energy tracked by the library is
+    E[ρ] = ∫∫ |sin(θ₁−θ₂)| ρ(θ₁) ρ(θ₂) dθ₁ dθ₂.
 """
 import sys
 import petsc4py
@@ -26,7 +30,7 @@ seed = Opt.getInt("seed", 47)
 grazing_collision = Opt.getBool("grazing_collision", False)
 collision_type = Opt.getString("collision_type", "nanbu")
 extra_collision = Opt.getInt("extra_collision", 0)+1
-monitor_every = Opt.getInt("monitor_every", 10)
+monitor_every = Opt.getInt("monitor_every", 100)
 
 Print(f"  nlocal={nlocal}")
 Print(f"  nu={nu}")
@@ -94,6 +98,16 @@ def vlasov_force(theta):
         plt.close(fig)
     return (L**2)*force.reshape(force.shape[0],1)
 
+def interaction_energy_fn(theta):
+    """E[ρ] = ∫∫ |sin(θ₁−θ₂)| ρ(θ₁)ρ(θ₂) dθ₁dθ₂ via histogram quadrature."""
+    hist, theta_edges = np.histogram(theta, bins=bins)
+    hist = comm.allreduce(hist, op=MPI.SUM)
+    delta_theta = 2*np.pi / (bins + 1)
+    rho = hist / (np.sum(hist) * delta_theta)
+    centers = 0.5 * (theta_edges[:-1] + theta_edges[1:])
+    W = np.abs(np.sin(centers[:, None] - centers[None, :]))
+    return float(np.sum(W * rho[:, None] * rho[None, :]) * delta_theta**2)
+
 opts = {
     "nlocal": nlocal,
     "nu": nu,
@@ -111,6 +125,7 @@ sim = CFMZNeedleDSMC(
     opts=opts,
     info=info,
     vlasov_force=vlasov_force,
+    interaction_energy=interaction_energy_fn,
     comm=MPI.COMM_WORLD,
 )
 sim.run(nsteps=nsteps, monitor_every=monitor_every)
