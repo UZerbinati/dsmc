@@ -39,6 +39,14 @@ class CFMZNeedleDSMC:
         - ``test``            (str)   initial condition: ``"uniform_angle"``
                                       or ``"perturbed_uniform_angle"``.
         - ``collision_type``  (str)   only ``"nanbu"`` is implemented.
+        - ``nu``              (float) for ``cross_section="maxwell"`` this is
+                                      the exact collision frequency; the
+                                      constraint dt ≤ 1/ν is enforced.  For
+                                      ``"hard_needle"`` it is only the initial
+                                      estimate of the NTC running maximum
+                                      ``_nu_max``; a good choice is
+                                      ``nu ≈ L · v_max`` where ``v_max`` is
+                                      the expected maximum relative speed.
         - ``extra_collision`` (int)   collision sub-steps per time step; default 1.
         - ``variance``        (str)   circular variance geometry: ``"circle"``
                                       or ``"real_projective_plane"``; default ``"circle"``.
@@ -54,8 +62,23 @@ class CFMZNeedleDSMC:
         - ``inertia``  (float) moment of inertia I.
         - ``length``   (float) rod half-length L.
 
-        Optional keys: ``cutoff``, ``ev`` (translational restitution),
-        ``om`` (rotational restitution).
+        Optional keys:
+
+        - ``cutoff``        (float) angular cutoff for near-parallel detection;
+                                    default 0.1.
+        - ``ev``            (float) translational restitution; default 1.0.
+        - ``om``            (float) rotational restitution; default 1.0.
+        - ``cross_section`` (str)   collision kernel.  ``"maxwell"`` (default)
+                                    uses a uniform kernel — all pairs equally
+                                    likely, matching the classical Nanbu method.
+                                    ``"hard_needle"`` uses the Onsager
+                                    excluded-volume kernel
+                                    W = |g·n| · L|sin(θ₁−θ₂)| derived for
+                                    2-D calamitic needles in Example B of
+                                    arXiv:2508.10744; Bird's NTC
+                                    acceptance–rejection is applied each step
+                                    and the running maximum ``_nu_max`` adapts
+                                    automatically.
 
     vlasov_force : callable or None
         If provided, called as ``vlasov_force(angle)`` each transport
@@ -92,11 +115,18 @@ class CFMZNeedleDSMC:
         self.dim = 2
         self.nlocal = int(opts["nlocal"])
         self.N = self.nlocal * self.size
-        self.nu = opts.get("nu", 1.0)
-        self.dt = opts.get("dt", 1e-2)
-        if 1 / self.nu < self.dt:
-            raise RuntimeError("You have too large of a time-step for the collisional frequency you specified")
+        self.nu   = opts.get("nu", 1.0)
+        self.dt   = opts.get("dt", 1e-2)
         self.info = info
+        # For Maxwell molecules the dt ≤ 1/ν constraint must hold exactly.
+        # For hard_needle the NTC running maximum _nu_max handles the rate
+        # automatically, so the constraint is skipped (nu is only an initial
+        # estimate and _nu_max may exceed it).
+        if info.get("cross_section", "maxwell") == "maxwell" and 1 / self.nu < self.dt:
+            raise RuntimeError("You have too large of a time-step for the collisional frequency you specified")
+        # Running maximum collision rate for the NTC method (hard_needle).
+        # Initialised to nu; grows monotonically during the simulation.
+        self._nu_max = self.nu
         self.bins = opts.get("bins", 31)
         self.delta_bins = 1 / (self.bins + 1)
         self.test = opts.get("test", "uniform_angle")

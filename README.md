@@ -45,6 +45,7 @@ E_kin + E[ρ] are tracked and plotted alongside the kinetic observables.
 | `test_10` | uniform | Onsager | ν=20, bins=128 |
 | `test_11` | uniform | Onsager | **No collisions** (pure Vlasov), bins=128 — energy conservation check |
 | `test_12` | perturbed | Onsager | ν=4, bins=128, perturbed IC |
+| `test_13` | uniform | — | **Hard-needle cross-section** (NTC): kernel W = \|g·n\| · L\|sin(Δθ)\|, arXiv:2508.10744 Example B |
 
 ## Dependencies
 
@@ -95,7 +96,7 @@ dsmc/
   utils.py      Shared PETSc/MPI helpers and Matplotlib style defaults
 tests/
   boltzmann/    test_0–2 (Sod shock tube, Nanbu), test_3 (Sod, BGK), test_4–5 (cylinder flow)
-  cfmz/         test_0–12
+  cfmz/         test_0–13
 ```
 
 ## Output
