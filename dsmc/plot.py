@@ -79,12 +79,14 @@ def plot_histograms(self, prefix=""):
     local_H_v, xedges, yedges = np.histogram2d(
         Vlocal[:, 0], Vlocal[:, 1], bins=(self.grid_x, self.grid_y),
     )
+    local_H_v = np.ascontiguousarray(local_H_v)
     H_v = np.zeros_like(local_H_v)
     self.comm.Reduce(local_H_v, H_v, op=_MPI.SUM, root=0)
 
     local_H_ang, thetaedges, omegaedges = np.histogram2d(
         Alocal[:, 0], Wlocal[:, 0], bins=(self.grid_angular, self.grid_omega),
     )
+    local_H_ang = np.ascontiguousarray(local_H_ang)
     H_ang = np.zeros_like(local_H_ang)
     self.comm.Reduce(local_H_ang, H_ang, op=_MPI.SUM, root=0)
 
