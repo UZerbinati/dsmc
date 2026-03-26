@@ -60,6 +60,8 @@ def plot_histograms(self, prefix=""):
     else:
         Maxwellian = self.maxwellian(0)
 
+    from mpi4py import MPI as _MPI
+
     vel = self.swarm.getField("velocity")
     Vlocal = vel.reshape(self.nlocal, self.dim).copy()
     self.swarm.restoreField("velocity")
@@ -72,26 +74,30 @@ def plot_histograms(self, prefix=""):
     Wlocal = omega.reshape(self.nlocal, 1).copy()
     self.swarm.restoreField("angular_velocity")
 
-    V_gathered = self.comm.gather(Vlocal, root=0)
-    A_gathered = self.comm.gather(Alocal, root=0)
-    W_gathered = self.comm.gather(Wlocal, root=0)
+    # Each rank builds its local 2D histograms and reduces to rank 0.
+    # This transfers O(bins²) instead of O(N) data over MPI.
+    local_H_v, xedges, yedges = np.histogram2d(
+        Vlocal[:, 0], Vlocal[:, 1], bins=(self.grid_x, self.grid_y),
+    )
+    H_v = np.zeros_like(local_H_v)
+    self.comm.Reduce(local_H_v, H_v, op=_MPI.SUM, root=0)
+
+    local_H_ang, thetaedges, omegaedges = np.histogram2d(
+        Alocal[:, 0], Wlocal[:, 0], bins=(self.grid_angular, self.grid_omega),
+    )
+    H_ang = np.zeros_like(local_H_ang)
+    self.comm.Reduce(local_H_ang, H_ang, op=_MPI.SUM, root=0)
 
     if self.rank != 0:
         return
 
-    V = np.vstack(V_gathered)
-    A = np.vstack(A_gathered)
-    W = np.vstack(W_gathered)
+    # Normalise
+    H_v   = H_v   / (np.sum(H_v)   * self.delta_x       * self.delta_y      )
+    H_ang = H_ang / (np.sum(H_ang) * self.delta_angular  * self.delta_omega  )
 
     # --- 2D velocity histogram ---
     fig, ax, cax = fig_axes(colorbar=True)
-    H, xedges, yedges = np.histogram2d(
-        V[:, 0], V[:, 1],
-        bins=(self.grid_x, self.grid_y),
-    )
-    normalisation = np.sum(H) * (self.delta_x * self.delta_y)
-    H = H / normalisation
-    pcm = ax.pcolormesh(xedges, yedges, H.T, cmap=pv_cmap, shading="auto", rasterized=True)
+    pcm = ax.pcolormesh(xedges, yedges, H_v.T, cmap=pv_cmap, shading="auto", rasterized=True)
     ax.set_xlabel(r"$v_x$")
     ax.set_ylabel(r"$v_y$")
     ax.set_xlim(-self.xlim, self.xlim)
@@ -102,14 +108,12 @@ def plot_histograms(self, prefix=""):
     fig.savefig(f"{prefix}_vel.pdf")
     fig.savefig(f"{prefix}_vel.png", dpi=400)
     plt.close(fig)
-    if self.dump == "particles":
-        np.save(f"{prefix}_vel.npy", V)
-    elif self.dump == "hist":
+    if self.dump == "hist":
         with open(f"{prefix}_vel.pickle", "wb") as fp:
-            pickle.dump({"hist": H, "xedges": xedges, "yedges": yedges}, fp)
+            pickle.dump({"hist": H_v, "xedges": xedges, "yedges": yedges}, fp)
 
     # --- vx marginal ---
-    H_x = np.sum(H, axis=1) * self.delta_y
+    H_x = np.sum(H_v, axis=1) * self.delta_y
     H_x = H_x / (np.sum(H_x) * self.delta_x)
     fig, ax, _ = fig_axes()
     ax.plot(
@@ -128,7 +132,7 @@ def plot_histograms(self, prefix=""):
     plt.close(fig)
 
     # --- vy marginal ---
-    H_y = np.sum(H, axis=0) * self.delta_x
+    H_y = np.sum(H_v, axis=0) * self.delta_x
     H_y = H_y / (np.sum(H_y) * self.delta_y)
     fig, ax, _ = fig_axes()
     ax.plot(
@@ -148,13 +152,7 @@ def plot_histograms(self, prefix=""):
 
     # --- 2D angular histogram ---
     fig, ax, cax = fig_axes(colorbar=True)
-    H, thetaedges, omegaedges = np.histogram2d(
-        A[:, 0], W[:, 0],
-        bins=(self.grid_angular, self.grid_omega),
-    )
-    normalisation = np.sum(H) * (self.delta_angular * self.delta_omega)
-    H = H / normalisation
-    pcm = ax.pcolormesh(thetaedges, omegaedges, H.T, cmap=pv_cmap, shading="auto", rasterized=True)
+    pcm = ax.pcolormesh(thetaedges, omegaedges, H_ang.T, cmap=pv_cmap, shading="auto", rasterized=True)
     ax.set_xlabel(r"$\theta$")
     ax.set_ylabel(r"$\omega$")
     ax.set_xlim(self.angular_min, self.angular_max)
@@ -165,15 +163,12 @@ def plot_histograms(self, prefix=""):
     fig.savefig(f"{prefix}_angular.pdf")
     fig.savefig(f"{prefix}_angular.png", dpi=400)
     plt.close(fig)
-    if self.dump == "particles":
-        np.save(f"{prefix}_theta.npy", A)
-        np.save(f"{prefix}_omega.npy", W)
-    elif self.dump == "hist":
+    if self.dump == "hist":
         with open(f"{prefix}_angular.pickle", "wb") as fp:
-            pickle.dump({"hist_theta": A, "hist_omega": W, "theta_edges": thetaedges, "omegaedges": omegaedges}, fp)
+            pickle.dump({"hist": H_ang, "theta_edges": thetaedges, "omega_edges": omegaedges}, fp)
 
     # --- theta marginal ---
-    H_theta = np.sum(H, axis=1) * self.delta_omega
+    H_theta = np.sum(H_ang, axis=1) * self.delta_omega
     H_theta = H_theta / (np.sum(H_theta) * self.delta_angular)
     fig, ax, _ = fig_axes()
     ax.plot(
@@ -185,9 +180,9 @@ def plot_histograms(self, prefix=""):
     ax.set_xlabel(r"$\theta$")
     ax.set_ylabel(r"$f(\theta)$")
     ax.legend()
-    m = np.mean(H_theta)
-    ymin = min(H_theta.min(), m - 0.1)
-    ymax = max(H_theta.max(), m + 0.1)
+    mv = np.mean(H_theta)
+    ymin = min(H_theta.min(), mv - 0.1)
+    ymax = max(H_theta.max(), mv + 0.1)
     margin = 0.02 * (ymax - ymin)
     ax.set_ylim(ymin - margin, ymax + margin)
     ax.tick_params(which="both", direction="in", top=True, right=True)
@@ -196,7 +191,7 @@ def plot_histograms(self, prefix=""):
     plt.close(fig)
 
     # --- omega marginal ---
-    H_omega = np.sum(H, axis=0) * self.delta_angular
+    H_omega = np.sum(H_ang, axis=0) * self.delta_angular
     H_omega = H_omega / (np.sum(H_omega) * self.delta_omega)
     fig, ax, _ = fig_axes()
     ax.plot(
