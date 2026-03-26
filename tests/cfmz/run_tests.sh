@@ -6,8 +6,8 @@
 
 set -eo pipefail
 
-NPROCS=2
-NLOCAL=500000
+NPROCS=10
+NLOCAL=1000000
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -24,7 +24,7 @@ FAILED_TESTS=()
 run_test() {
     local script="$1"
     echo "--- $script ---"
-    if mpirun -n "$NPROCS" python "$script" -nlocal "$NLOCAL" 2>&1 | tail -3; then
+    if mpirun --use-hwthread-cpus -n "$NPROCS" python "$script" -nlocal "$NLOCAL" 2>&1; then
         PASS=$((PASS + 1))
     else
         FAIL=$((FAIL + 1))

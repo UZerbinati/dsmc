@@ -16,7 +16,7 @@ import numpy as np
 Opt = PETSc.Options()
 Print("Running homogeneous CFMZ needle DSMC with options:")
 
-nlocal = Opt.getReal("nlocal", 1e7)
+nlocal = Opt.getReal("nlocal", 1e6)
 nlocal = int(nlocal)
 bins = Opt.getInt("bins", 256)
 dt = Opt.getReal("dt", 0.05)

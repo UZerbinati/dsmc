@@ -20,7 +20,7 @@ def plot_history(self, prefix=""):
     if "interaction_energy" in self.history:
         to_plot.append((self.history["interaction_energy"], r"$\mathcal{E}[\rho]$", "_interaction_energy"))
     if "total_energy" in self.history:
-        to_plot.append((self.history["total_energy"], r"$E_{\mathrm{kin,rot}}/N + \tfrac{L^2}{2}\,\mathcal{E}[\rho]$", "_total_energy"))
+        to_plot.append((self.history["total_energy"], r"$E_{\mathrm{kin,rot}}/N + \,\mathcal{E}[\rho]$", "_total_energy"))
     if "circular_var" in self.history:
         to_plot.append((self.history["circular_var"], r"$\mathrm{Var}(\theta)$", "_variance"))
 
