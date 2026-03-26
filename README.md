@@ -43,7 +43,7 @@ E_kin + E[ρ] are tracked and plotted alongside the kinetic observables.
 | `test_8` | uniform | Onsager | ν=4, bins=128 |
 | `test_9` | uniform | Onsager | ν=0.5, bins=128 |
 | `test_10` | uniform | Onsager | ν=20, bins=128 |
-| `test_11` | uniform | Onsager | ν=4, bins=128 |
+| `test_11` | uniform | Onsager | **No collisions** (pure Vlasov), bins=128 — energy conservation check |
 | `test_12` | perturbed | Onsager | ν=4, bins=128, perturbed IC |
 
 ## Dependencies

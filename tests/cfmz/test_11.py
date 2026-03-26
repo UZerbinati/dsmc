@@ -1,12 +1,23 @@
 """
-Test with Vlasov force — Onsager potential
-------------------------------------------
-Mean-field interaction potential: W(θ₁, θ₂) = |sin(θ₁ − θ₂)|  (Onsager).
+Pure Vlasov test — Onsager potential, no collisions
+----------------------------------------------------
+Collisions are disabled by setting ``extra_collision=-1`` (default), so
+``extra_collision = int(-1 + 1) = 0`` and the collision loop is skipped.
+This is the energy-conservation check: in the collisionless limit the
+conserved quantity is
+
+    KE_rot / N  +  (L²/2) · E[ρ]  =  const
+
+where KE_rot = ½ I Σ ωᵢ² is the total rotational kinetic energy,
+N is the total particle count, L is the rod length, and
+
+    E[ρ] = ∫∫ |sin(θ₁−θ₂)| ρ(θ₁) ρ(θ₂) dθ₁ dθ₂
+
+is the Onsager interaction energy.  Translational KE is decoupled from
+the Vlasov force and is independently conserved.
 
 The Vlasov torque on a particle at θ is
-    F(θ) = −L² ∫ sign(sin(θ−θ')) cos(θ−θ') ρ(θ') dθ'
-and the interaction energy tracked by the library is
-    E[ρ] = ∫∫ |sin(θ₁−θ₂)| ρ(θ₁) ρ(θ₂) dθ₁ dθ₂.
+    F(θ) = −L² ∫ sign(sin(θ−θ')) cos(θ−θ') ρ(θ') dθ'.
 """
 import sys
 import petsc4py
@@ -56,31 +67,27 @@ info = {"inertia": 1.0,
         "cutoff": 0.1,   # angular cutoff
        }
 vlasov_energy_history = []
-vlasov_interpolant_mesh = np.linspace(0, 2*np.pi, bins)
-def hat_interpolant(x,y, mesh):
-    hat = lambda t: 1-np.abs(t)
-    interpolant = y[...,None]*hat(x[...,None][:,0]-mesh)
-    interpolant = (1/interpolant.shape[0])*interpolant
-    return np.sum(interpolant, axis=0)
+
+# Precompute kernel matrix K[k,j] = sign(sin(θ_k − θ_j)) cos(θ_k − θ_j)
+# on a uniform grid covering [0, 2π).  Computed once; reused every step.
+_grid_centers = (np.arange(bins) + 0.5) * (2*np.pi / bins)
+_diff  = _grid_centers[:, None] - _grid_centers[None, :]   # (bins, bins)
+_K_mat = np.sign(np.sin(_diff)) * np.cos(_diff)             # (bins, bins)
 
 comm = MPI.COMM_WORLD
 def vlasov_force(theta):
-    hist, theta_edges = np.histogram(theta, bins=bins)
+    hist, theta_edges = np.histogram(theta.ravel(), bins=bins, range=(0.0, 2*np.pi))
     hist = comm.allreduce(hist, op=MPI.SUM)
-    delta_theta = 2*np.pi/(bins+1)
-    normalisation = np.sum(hist)*delta_theta
-    hist = hist/normalisation
-    L = info["length"]
+    delta_theta = 2*np.pi / bins
+    rho = hist / (np.sum(hist) * delta_theta)
     centers = 0.5 * (theta_edges[:-1] + theta_edges[1:])
-    np.sin(theta[...,None]-centers)
-    B = np.sign(np.sin(theta[...,None][:,0]-centers))
-    A = np.cos(theta[...,None][:,0]-centers)
-    force = -np.sum(A*B*hist, axis=1)*delta_theta
+    # O(bins²) grid convolution — no O(N×bins) broadcast
+    F_grid = -delta_theta * (_K_mat @ rho)                  # (bins,)
+    L = info["length"]
+    # Interpolate to particle positions: O(N log bins)
+    force = L**2 * np.interp(theta.ravel(), centers, F_grid, period=2*np.pi)
     if comm.Get_rank() == 0:
-        vlasov_interpolant = hat_interpolant(theta, force, vlasov_interpolant_mesh)
-        vlasov_energy_history.append(np.sqrt(np.sum(np.abs(vlasov_interpolant)**2) \
-                                    /vlasov_interpolant_mesh[1]-vlasov_interpolant_mesh[0])
-                                    )
+        vlasov_energy_history.append(np.sqrt(np.sum(F_grid**2) * delta_theta))
         fig, ax, _ = fig_axes()
         time = np.array(range(len(vlasov_energy_history)))*dt
         ax.plot(time, vlasov_energy_history, color="black", linewidth=1.5)
@@ -90,15 +97,15 @@ def vlasov_force(theta):
         fig.savefig(f"output/test_11_output_cfmz_{collision_type}/vlasov_energy.pdf")
         fig.savefig(f"output/test_11_output_cfmz_{collision_type}/vlasov_energy.png", dpi=400)
         plt.close(fig)
-    return (L**2)*force.reshape(force.shape[0],1)
+    return force.reshape(-1, 1)
 
 def interaction_energy_fn(theta):
     """E[ρ] = ∫∫ |sin(θ₁−θ₂)| ρ(θ₁)ρ(θ₂) dθ₁dθ₂ via histogram quadrature."""
-    hist, theta_edges = np.histogram(theta, bins=bins)
+    hist, _ = np.histogram(theta.ravel(), bins=bins, range=(0.0, 2*np.pi))
     hist = comm.allreduce(hist, op=MPI.SUM)
-    delta_theta = 2*np.pi / (bins + 1)
+    delta_theta = 2*np.pi / bins
     rho = hist / (np.sum(hist) * delta_theta)
-    centers = 0.5 * (theta_edges[:-1] + theta_edges[1:])
+    centers = (np.arange(bins) + 0.5) * delta_theta
     W = np.abs(np.sin(centers[:, None] - centers[None, :]))
     return float(np.sum(W * rho[:, None] * rho[None, :]) * delta_theta**2)
 

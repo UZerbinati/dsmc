@@ -16,7 +16,7 @@ def nanbu_collision_step(self):
        rigid-body equations with restitution coefficients ev (translational)
        and eom (rotational).
     3. Post-collisional velocities (vi', vj') and angular velocities
-       (ωi', ωj') are updated.
+       (ωi', ωj') are updated in-place.
 
     Pairs whose orientation difference |θi - θj| < cutoff are nearly
     parallel; these fall back to a spherical-like head-on collision to
@@ -37,19 +37,18 @@ def nanbu_collision_step(self):
         self.swarm.restoreField("angular_velocity")
         return
 
-    # random permutation and pairing
-    r = self.rng.permutation(self.nlocal)
-    i = r[:Mcol]
-    j = r[Mcol:2 * Mcol]
+    # random pairing: sample only the 2*Mcol indices actually needed
+    pairs = self.rng.choice(self.nlocal, size=2 * Mcol, replace=False)
+    i = pairs[:Mcol]
+    j = pairs[Mcol:]
 
-    vi = vel[i].copy()
-    vj = vel[j].copy()
-
-    thetai = theta[i].copy()
-    thetaj = theta[j].copy()
-
-    omegai = omega[i].copy()
-    omegaj = omega[j].copy()
+    # fancy indexing already produces copies, no explicit .copy() needed
+    vi = vel[i]
+    vj = vel[j]
+    thetai = theta[i]
+    thetaj = theta[j]
+    omegai = omega[i]
+    omegaj = omega[j]
 
     # rod directions
     nui = np.column_stack((np.cos(thetai), np.sin(thetai)))
@@ -58,21 +57,20 @@ def nanbu_collision_step(self):
     # random impact angle
     psi = 2.0 * np.pi * self.rng.random(Mcol)
     n = np.column_stack((np.cos(psi), np.sin(psi)))
-    n_cutoff = n.copy()
 
     # cutoff for near-parallel rods
     dtheta = np.abs(thetai - thetaj)
     cutoff = self.info.get("cutoff", 0.1)
     idx = (dtheta > cutoff) & (dtheta < 2.0 * np.pi - cutoff)
-    idxf = idx.astype(float)
-    not_idxf = 1.0 - idxf
+    full_idx = np.where(idx)[0]
+    cut_idx  = np.where(~idx)[0]
 
     # sampled contact arms
     L = self.info["length"]
     ell = L * self.rng.random(Mcol)
 
     ri = ell[:, None] * nui
-    rj = L * nuj   # this matches your MATLAB code literally
+    rj = L * nuj
 
     # relative contact velocity
     ri_perp = np.column_stack((ri[:, 1], -ri[:, 0]))
@@ -91,32 +89,31 @@ def nanbu_collision_step(self):
     J = -np.sum(V * n, axis=1) / denom
 
     # restitution coefficients
-    ev = self.info.get("ev", 1.0)
+    ev  = self.info.get("ev", 1.0)
     eom = self.info.get("om", 1.0)
 
-    # fallback spherical-like collision for nearly parallel rods
-    vn_cut = np.sum((vi - vj) * n_cutoff, axis=1)
+    # pre-collision normal velocity difference (for cutoff fallback)
+    vn_cut = np.sum((vi - vj) * n, axis=1)
 
-    vi_prime = (
-        vi
-        + ((1.0 + ev) * J / m)[:, None] * n * idxf[:, None]
-        - 0.5 * (1.0 + ev) * vn_cut[:, None] * n_cutoff * not_idxf[:, None]
-    )
+    # apply full rigid-rod collision (non-parallel pairs)
+    if full_idx.size:
+        scale_v = ((1.0 + ev) * J[full_idx] / m)[:, None]
+        vi[full_idx]     += scale_v * n[full_idx]
+        vj[full_idx]     -= scale_v * n[full_idx]
+        omegai[full_idx] -= (1.0 + eom) * J[full_idx] * ci[full_idx] / I
+        omegaj[full_idx] += (1.0 + eom) * J[full_idx] * cj[full_idx] / I
 
-    vj_prime = (
-        vj
-        - ((1.0 + ev) * J / m)[:, None] * n * idxf[:, None]
-        + 0.5 * (1.0 + ev) * vn_cut[:, None] * n_cutoff * not_idxf[:, None]
-    )
-
-    omegai_prime = omegai - (1.0 + eom) * J * ci / I * idxf
-    omegaj_prime = omegaj + (1.0 + eom) * J * cj / I * idxf
+    # apply spherical fallback (nearly-parallel pairs)
+    if cut_idx.size:
+        scale_cut = (0.5 * (1.0 + ev) * vn_cut[cut_idx])[:, None]
+        vi[cut_idx] -= scale_cut * n[cut_idx]
+        vj[cut_idx] += scale_cut * n[cut_idx]
 
     # write back
-    vel[i] = vi_prime
-    vel[j] = vj_prime
-    omega[i] = omegai_prime
-    omega[j] = omegaj_prime
+    vel[i]   = vi
+    vel[j]   = vj
+    omega[i] = omegai
+    omega[j] = omegaj
 
     self.swarm.restoreField("velocity")
     self.swarm.restoreField("orientation")

@@ -226,31 +226,48 @@ class CFMZNeedleDSMC:
         if sum(np.where(angle <= 0, 1,0))>0:
             raise RuntimeError("[!] Not sticking to the manifold!")
 
-        local_n = self.nlocal
-        global_n = self.comm.allreduce(local_n, op=MPI.SUM)
+        local_n        = self.nlocal
+        local_mom      = vel.sum(axis=0)      # shape (dim,)
+        local_ang_mom  = omega.sum(axis=0)    # shape (1,)
+        local_energy_rot = 0.5 * self.info["inertia"] * np.sum(omega * omega)
+        local_energy = (0.5 * self.info["mass"] * np.sum(vel * vel) +
+                        local_energy_rot)
 
-        local_mom = vel.sum(axis=0)
-        global_mom = self.comm.allreduce(local_mom, op=MPI.SUM)
-
-        local_ang_mom = omega.sum(axis=0) 
-        global_ang_mom = self.comm.allreduce(local_ang_mom, op=MPI.SUM)
-
-        local_energy = 0.5 * self.info["mass"] * np.sum(vel*vel) + 0.5*self.info["inertia"]*np.sum(omega*omega)
-        global_energy = self.comm.allreduce(local_energy, op=MPI.SUM)
-
-        mean_u = global_mom / global_n
-        mean_eta = global_ang_mom/global_n
-        temp = (2.0 / (self.dim+1)) * global_energy / global_n 
-        
         #Circular stats
         if self.variance == "circle":
-            z = np.exp(1j*angle)
+            z = np.exp(1j * angle)
         elif self.variance == "real_projective_plane":
-            z = np.exp(2j*np.mod(angle, np.pi))
+            z = np.exp(2j * np.mod(angle, np.pi))
         else:
             raise RuntimeError(f"[!] Do not know how to compute the variance for {self.variance}")
         local_z_sum = np.sum(z)
-        global_z_sum = self.comm.allreduce(local_z_sum, op=MPI.SUM)
+
+        # Pack all local quantities into one buffer and reduce in a single call.
+        # Layout: [n, energy, z.real, z.imag, mom_x, mom_y, ang_mom]
+        local_buf = np.array([
+            float(local_n),
+            float(local_energy),
+            float(local_z_sum.real),
+            float(local_z_sum.imag),
+            float(local_mom[0]),
+            float(local_mom[1]),
+            float(local_ang_mom[0]),
+            float(local_energy_rot),
+        ], dtype=np.float64)
+        global_buf = np.zeros(8, dtype=np.float64)
+        self.comm.Allreduce(local_buf, global_buf, op=MPI.SUM)
+
+        global_n          = global_buf[0]
+        global_energy     = global_buf[1]
+        global_z_sum      = global_buf[2] + 1j * global_buf[3]
+        global_mom        = global_buf[4:6]
+        global_ang_mom    = global_buf[6:7]
+        global_energy_rot = global_buf[7]
+
+        mean_u   = global_mom    / global_n
+        mean_eta = global_ang_mom / global_n
+        temp = (2.0 / (self.dim + 1)) * global_energy / global_n
+
         m = global_z_sum / global_n
         R = np.abs(m)
 
@@ -260,8 +277,9 @@ class CFMZNeedleDSMC:
         self.history["energy"].append(global_energy / global_n)
         if self.interaction_energy is not None:
             E_int = self.interaction_energy(angle)
+            L = self.info.get("length", 1.0)
             self.history["interaction_energy"].append(E_int)
-            self.history["total_energy"].append(global_energy / global_n + E_int)
+            self.history["total_energy"].append(global_energy_rot / global_n + 0.5 * L**2 * E_int)
         self.history["momentum_1"].append(np.linalg.norm(mean_u[0]))
         self.history["momentum_2"].append(np.linalg.norm(mean_u[1]))
         self.history["ang_momentum"].append(np.linalg.norm(mean_eta))
