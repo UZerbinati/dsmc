@@ -257,11 +257,11 @@ class CFMZNeedleDSMC:
         
         self.history["step"].append(step)
         self.history["temperature"].append(temp)
-        self.history["energy"].append(global_energy)
+        self.history["energy"].append(global_energy / global_n)
         if self.interaction_energy is not None:
             E_int = self.interaction_energy(angle)
             self.history["interaction_energy"].append(E_int)
-            self.history["total_energy"].append(global_energy + E_int)
+            self.history["total_energy"].append(global_energy / global_n + E_int)
         self.history["momentum_1"].append(np.linalg.norm(mean_u[0]))
         self.history["momentum_2"].append(np.linalg.norm(mean_u[1]))
         self.history["ang_momentum"].append(np.linalg.norm(mean_eta))
