@@ -3,6 +3,7 @@ Shared utilities used by all DSMC classes.
 """
 import numpy as np
 import matplotlib as mpl
+import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 
 
@@ -15,10 +16,10 @@ def init_plot():
     mpl.rcParams.update({
         "font.family":       "serif",
         "mathtext.fontset":  "cm",
-        "font.size":         10,
-        "axes.labelsize":    11,
-        "xtick.labelsize":   9,
-        "ytick.labelsize":   9,
+        "font.size":         12,
+        "axes.labelsize":    14,
+        "xtick.labelsize":   11,
+        "ytick.labelsize":   11,
         "axes.linewidth":    0.8,
         "lines.linewidth":   1.5,
         "xtick.direction":   "in",
@@ -28,6 +29,30 @@ def init_plot():
         "xtick.minor.size":  2,
         "ytick.minor.size":  2,
     })
+
+# Fixed axes box dimensions (inches) shared by all plots.
+_AX_W,   _AX_H   = 4.0,  2.6
+_ML, _MR, _MT, _MB = 0.90, 0.30, 0.20, 0.68
+_CBAR_W, _CBAR_PAD  = 0.18, 0.10
+
+def fig_axes(colorbar=False):
+    """Return (fig, ax[, cax]) with a fixed axes box of _AX_W × _AX_H inches.
+
+    Every plot produced by this helper has an identical axes box regardless
+    of whether a colorbar is present; the figure is simply made wider to
+    accommodate it.
+    """
+    r  = _MR + (_CBAR_PAD + _CBAR_W if colorbar else 0)
+    fw = _ML + _AX_W + r
+    fh = _MT + _AX_H + _MB
+    fig = plt.figure(figsize=(fw, fh))
+    ax  = fig.add_axes([_ML/fw, _MB/fh, _AX_W/fw, _AX_H/fh])
+    ax.yaxis.get_major_formatter().set_useOffset(False)
+    ax.xaxis.get_major_formatter().set_useOffset(False)
+    if colorbar:
+        cax = fig.add_axes([(_ML + _AX_W + _CBAR_PAD)/fw, _MB/fh, _CBAR_W/fw, _AX_H/fh])
+        return fig, ax, cax
+    return fig, ax, None
 
 
 def paraview_cool_to_warm_extended():

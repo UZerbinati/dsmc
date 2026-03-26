@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pickle
-from dsmc.utils import init_plot, pv_cmap
+from dsmc.utils import init_plot, pv_cmap, fig_axes
 
 
 def plot_history(self, prefix=""):
@@ -25,16 +25,13 @@ def plot_history(self, prefix=""):
         to_plot.append((self.history["circular_var"], r"$\mathrm{Var}(\theta)$", "_variance"))
 
     for data, ylabel, fname_suffix in to_plot:
-        fig, ax = plt.subplots(figsize=(5.5, 3.2))
+        fig, ax, _ = fig_axes()
         ax.plot(time, np.array(data), color="black", linewidth=1.5)
         ax.set_xlabel(r"$t$")
         ax.set_ylabel(ylabel)
-        for spine in ax.spines.values():
-            spine.set_linewidth(0.8)
         ax.tick_params(which="both", direction="in", top=True, right=True)
-        fig.tight_layout(pad=0.2)
-        fig.savefig(f"{prefix}{fname_suffix}.pdf", bbox_inches="tight")
-        fig.savefig(f"{prefix}{fname_suffix}.png", dpi=400, bbox_inches="tight")
+        fig.savefig(f"{prefix}{fname_suffix}.pdf")
+        fig.savefig(f"{prefix}{fname_suffix}.png", dpi=400)
         plt.close(fig)
 
 
@@ -87,7 +84,7 @@ def plot_histograms(self, prefix=""):
     W = np.vstack(W_gathered)
 
     # --- 2D velocity histogram ---
-    fig, ax = plt.subplots(figsize=(5.5, 3.6))
+    fig, ax, cax = fig_axes(colorbar=True)
     H, xedges, yedges = np.histogram2d(
         V[:, 0], V[:, 1],
         bins=(self.grid_x, self.grid_y),
@@ -100,12 +97,10 @@ def plot_histograms(self, prefix=""):
     ax.set_xlim(-self.xlim, self.xlim)
     ax.set_ylim(-self.ylim, self.ylim)
     ax.tick_params(which="both", direction="in", top=True, right=True)
-    cbar = fig.colorbar(pcm, ax=ax, pad=0.02)
-    cbar.ax.tick_params(labelsize=8)
-    cbar.set_label(r"$f(v)$", fontsize=10)
-    fig.tight_layout(pad=0.2)
-    fig.savefig(f"{prefix}_vel.pdf", bbox_inches="tight")
-    fig.savefig(f"{prefix}_vel.png", dpi=400, bbox_inches="tight")
+    cbar = fig.colorbar(pcm, cax=cax)
+    cbar.set_label(r"$f(v)$")
+    fig.savefig(f"{prefix}_vel.pdf")
+    fig.savefig(f"{prefix}_vel.png", dpi=400)
     plt.close(fig)
     if self.dump == "particles":
         np.save(f"{prefix}_vel.npy", V)
@@ -116,7 +111,7 @@ def plot_histograms(self, prefix=""):
     # --- vx marginal ---
     H_x = np.sum(H, axis=1) * self.delta_y
     H_x = H_x / (np.sum(H_x) * self.delta_x)
-    fig, ax = plt.subplots(figsize=(5.5, 3.2))
+    fig, ax, _ = fig_axes()
     ax.plot(
         [x + 0.5 * self.delta_x for x in xedges[:-1]], H_x,
         linestyle="None", marker="o", markersize=6,
@@ -127,18 +122,15 @@ def plot_histograms(self, prefix=""):
     ax.set_xlabel(r"$v_x$")
     ax.set_ylabel(r"$f(v_x)$")
     ax.legend()
-    for spine in ax.spines.values():
-        spine.set_linewidth(0.8)
     ax.tick_params(which="both", direction="in", top=True, right=True)
-    fig.tight_layout(pad=0.2)
-    fig.savefig(f"{prefix}_vel_x.pdf", bbox_inches="tight")
-    fig.savefig(f"{prefix}_vel_x.png", dpi=400, bbox_inches="tight")
+    fig.savefig(f"{prefix}_vel_x.pdf")
+    fig.savefig(f"{prefix}_vel_x.png", dpi=400)
     plt.close(fig)
 
     # --- vy marginal ---
     H_y = np.sum(H, axis=0) * self.delta_x
     H_y = H_y / (np.sum(H_y) * self.delta_y)
-    fig, ax = plt.subplots(figsize=(5.5, 3.2))
+    fig, ax, _ = fig_axes()
     ax.plot(
         [y + 0.5 * self.delta_y for y in yedges[:-1]], H_y,
         linestyle="None", marker="o", markersize=6,
@@ -149,16 +141,13 @@ def plot_histograms(self, prefix=""):
     ax.set_xlabel(r"$v_y$")
     ax.set_ylabel(r"$f(v_y)$")
     ax.legend()
-    for spine in ax.spines.values():
-        spine.set_linewidth(0.8)
     ax.tick_params(which="both", direction="in", top=True, right=True)
-    fig.tight_layout(pad=0.2)
-    fig.savefig(f"{prefix}_vel_y.pdf", bbox_inches="tight")
-    fig.savefig(f"{prefix}_vel_y.png", dpi=400, bbox_inches="tight")
+    fig.savefig(f"{prefix}_vel_y.pdf")
+    fig.savefig(f"{prefix}_vel_y.png", dpi=400)
     plt.close(fig)
 
     # --- 2D angular histogram ---
-    fig, ax = plt.subplots(figsize=(5.5, 3.6))
+    fig, ax, cax = fig_axes(colorbar=True)
     H, thetaedges, omegaedges = np.histogram2d(
         A[:, 0], W[:, 0],
         bins=(self.grid_angular, self.grid_omega),
@@ -171,12 +160,10 @@ def plot_histograms(self, prefix=""):
     ax.set_xlim(self.angular_min, self.angular_max)
     ax.set_ylim(self.omega_min, self.omega_max)
     ax.tick_params(which="both", direction="in", top=True, right=True)
-    cbar = fig.colorbar(pcm, ax=ax, pad=0.02)
-    cbar.ax.tick_params(labelsize=8)
-    cbar.set_label(r"$f(\theta,\omega)$", fontsize=10)
-    fig.tight_layout(pad=0.2)
-    fig.savefig(f"{prefix}_angular.pdf", bbox_inches="tight")
-    fig.savefig(f"{prefix}_angular.png", dpi=400, bbox_inches="tight")
+    cbar = fig.colorbar(pcm, cax=cax)
+    cbar.set_label(r"$f(\theta,\omega)$")
+    fig.savefig(f"{prefix}_angular.pdf")
+    fig.savefig(f"{prefix}_angular.png", dpi=400)
     plt.close(fig)
     if self.dump == "particles":
         np.save(f"{prefix}_theta.npy", A)
@@ -188,7 +175,7 @@ def plot_histograms(self, prefix=""):
     # --- theta marginal ---
     H_theta = np.sum(H, axis=1) * self.delta_omega
     H_theta = H_theta / (np.sum(H_theta) * self.delta_angular)
-    fig, ax = plt.subplots(figsize=(5.5, 3.2))
+    fig, ax, _ = fig_axes()
     ax.plot(
         [theta + 0.5 * self.delta_angular for theta in thetaedges[:-1]], H_theta,
         linestyle="None", marker="o", markersize=6,
@@ -203,18 +190,15 @@ def plot_histograms(self, prefix=""):
     ymax = max(H_theta.max(), m + 0.1)
     margin = 0.02 * (ymax - ymin)
     ax.set_ylim(ymin - margin, ymax + margin)
-    for spine in ax.spines.values():
-        spine.set_linewidth(0.8)
     ax.tick_params(which="both", direction="in", top=True, right=True)
-    fig.tight_layout(pad=0.2)
-    fig.savefig(f"{prefix}_theta.pdf", bbox_inches="tight")
-    fig.savefig(f"{prefix}_theta.png", dpi=400, bbox_inches="tight")
+    fig.savefig(f"{prefix}_theta.pdf")
+    fig.savefig(f"{prefix}_theta.png", dpi=400)
     plt.close(fig)
 
     # --- omega marginal ---
     H_omega = np.sum(H, axis=0) * self.delta_angular
     H_omega = H_omega / (np.sum(H_omega) * self.delta_omega)
-    fig, ax = plt.subplots(figsize=(5.5, 3.2))
+    fig, ax, _ = fig_axes()
     ax.plot(
         [w + 0.5 * self.delta_omega for w in omegaedges[:-1]], H_omega,
         linestyle="None", marker="o", markersize=6,
@@ -225,12 +209,9 @@ def plot_histograms(self, prefix=""):
     ax.set_xlabel(r"$\omega$")
     ax.set_ylabel(r"$f(\omega)$")
     ax.legend()
-    for spine in ax.spines.values():
-        spine.set_linewidth(0.8)
     ax.tick_params(which="both", direction="in", top=True, right=True)
-    fig.tight_layout(pad=0.2)
-    fig.savefig(f"{prefix}_omega.pdf", bbox_inches="tight")
-    fig.savefig(f"{prefix}_omega.png", dpi=400, bbox_inches="tight")
+    fig.savefig(f"{prefix}_omega.pdf")
+    fig.savefig(f"{prefix}_omega.png", dpi=400)
     plt.close(fig)
 
 
@@ -279,16 +260,13 @@ def plot_observables(self, prefix=""):
         (vel_x, r"$u_x$", f"{prefix}_velocity.pdf"),
         (temp_x, r"$T$", f"{prefix}_temperature.pdf"),
     ]:
-        fig, ax = plt.subplots(figsize=(5.5, 3.2))
+        fig, ax, _ = fig_axes()
         ax.plot(x_centers, data, color="black")
         ax.set_xlabel(r"$x$")
         ax.set_ylabel(ylabel)
         ax.tick_params(which="both", direction="in", top=True, right=True)
-        for spine in ax.spines.values():
-            spine.set_linewidth(0.8)
-        fig.tight_layout(pad=0.2)
-        fig.savefig(fname, bbox_inches="tight")
-        fig.savefig(fname.replace(".pdf", ".png"), dpi=400, bbox_inches="tight")
+        fig.savefig(fname)
+        fig.savefig(fname.replace(".pdf", ".png"), dpi=400)
         plt.close(fig)
 
     with open(f"{prefix}_observables.pickle", "wb") as fp:
@@ -392,7 +370,7 @@ def plot_velocity_histograms(self, prefix=""):
 
     V = np.vstack(gathered)
 
-    fig, ax = plt.subplots(figsize=(5.5, 3.6))
+    fig, ax, cax = fig_axes(colorbar=True)
     H, xedges, yedges = np.histogram2d(
         V[:, 0], V[:, 1],
         bins=(self.grid_x, self.grid_y),
@@ -405,10 +383,8 @@ def plot_velocity_histograms(self, prefix=""):
     ax.set_xlim(-self.xlim, self.xlim)
     ax.set_ylim(-self.ylim, self.ylim)
     ax.tick_params(which="both", direction="in", top=True, right=True)
-    cbar = fig.colorbar(pcm, ax=ax, pad=0.02)
-    cbar.ax.tick_params(labelsize=8)
-    cbar.set_label(r"$f(v)$", fontsize=10)
-    fig.tight_layout(pad=0.2)
-    fig.savefig(f"{prefix}_vel.pdf", bbox_inches="tight")
-    fig.savefig(f"{prefix}_vel.png", dpi=400, bbox_inches="tight")
+    cbar = fig.colorbar(pcm, cax=cax)
+    cbar.set_label(r"$f(v)$")
+    fig.savefig(f"{prefix}_vel.pdf")
+    fig.savefig(f"{prefix}_vel.png", dpi=400)
     plt.close(fig)

@@ -25,7 +25,7 @@ needle-like (oriented rigid rod) systems.  Each particle carries translational
 velocity **v**, orientation θ ∈ [0, 2π), and angular velocity ω.  An optional
 mean-field (Vlasov) force acts on ω.
 
-Tests 8–14 use the **Onsager potential** W(θ₁,θ₂) = |sin(θ₁−θ₂)|, which gives
+Tests 8–12 use the **Onsager potential** W(θ₁,θ₂) = |sin(θ₁−θ₂)|, which gives
 the Vlasov torque F(θ) = −L² ∫ sign(sin(θ−θ')) cos(θ−θ') ρ(θ') dθ'.  The
 interaction energy E[ρ] = ∫∫ W ρ ρ dθ₁ dθ₂ and the total energy
 E_kin + E[ρ] are tracked and plotted alongside the kinetic observables.
@@ -39,14 +39,12 @@ E_kin + E[ρ] are tracked and plotted alongside the kinetic observables.
 | `test_4` | uniform | −sin(θ−θ_av) | Kuramoto meanfield |
 | `test_5` | perturbed | −sin(θ−θ_av) | Kuramoto meanfield, perturbed IC |
 | `test_6` | uniform | −sin(θ−θ_av) | Kuramoto meanfield, seed=49 |
-| `test_7` | uniform | — | No force, high ν=100 |
-| `test_8` | uniform | Onsager | ν=10, bins=256 |
-| `test_9` | uniform | Onsager | ν=1, bins=128 |
-| `test_10` | uniform | Onsager | ν=100, bins=128 |
-| `test_11` | uniform | Onsager | ν=1, bins=128 |
-| `test_12` | uniform | Onsager | ν=10, bins=256 |
-| `test_13` | uniform | Onsager | ν=10, bins=128, **no collisions** (pure Vlasov-transport) |
-| `test_14` | perturbed | Onsager | ν=10, bins=128, perturbed IC |
+| `test_7` | uniform | −sin(θ−θ_av) |  Kuramoto meanfield, high ν=20 |
+| `test_8` | uniform | Onsager | ν=4, bins=128 |
+| `test_9` | uniform | Onsager | ν=0.5, bins=128 |
+| `test_10` | uniform | Onsager | ν=20, bins=128 |
+| `test_11` | uniform | Onsager | ν=4, bins=128 |
+| `test_12` | perturbed | Onsager | ν=4, bins=128, perturbed IC |
 
 ## Dependencies
 
@@ -97,7 +95,7 @@ dsmc/
   utils.py      Shared PETSc/MPI helpers and Matplotlib style defaults
 tests/
   boltzmann/    test_0–2 (Sod shock tube, Nanbu), test_3 (Sod, BGK), test_4–5 (cylinder flow)
-  cfmz/         test_0–14
+  cfmz/         test_0–12
 ```
 
 ## Output

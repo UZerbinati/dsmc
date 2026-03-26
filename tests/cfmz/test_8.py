@@ -16,21 +16,22 @@ from mpi4py import MPI
 from dsmc import CFMZNeedleDSMC, Print
 import numpy as np
 import matplotlib.pyplot as plt
+from dsmc.utils import fig_axes
 
 Opt = PETSc.Options()
 Print("Running homogeneous CFMZ needle DSMC with options:")
 
-nlocal = Opt.getReal("nlocal", 1e6)
+nlocal = Opt.getReal("nlocal", 5e5)
 nlocal = int(nlocal)
-bins = Opt.getInt("bins", 256)
-dt = Opt.getReal("dt", 0.01)
-nu = Opt.getReal("nu", 10)
-nsteps = Opt.getInt("nsteps", 2000)
+bins = Opt.getInt("bins", 128)
+dt = Opt.getReal("dt", 0.05)
+nu = Opt.getReal("nu", 4)
+nsteps = Opt.getInt("nsteps", 4000)
 seed = Opt.getInt("seed", 47)
 grazing_collision = Opt.getBool("grazing_collision", False)
 collision_type = Opt.getString("collision_type", "nanbu")
 extra_collision = Opt.getInt("extra_collision", 0)+1
-monitor_every = Opt.getInt("monitor_every", 100)
+monitor_every = Opt.getInt("monitor_every", 50)
 
 Print(f"  nlocal={nlocal}")
 Print(f"  nu={nu}")
@@ -80,21 +81,14 @@ def vlasov_force(theta):
         vlasov_energy_history.append(np.sqrt(np.sum(np.abs(vlasov_interpolant)**2) \
                                     /vlasov_interpolant_mesh[1]-vlasov_interpolant_mesh[0])
                                     )
-        fig, ax = plt.subplots(figsize=(5.5, 3.2))
+        fig, ax, _ = fig_axes()
         time = np.array(range(len(vlasov_energy_history)))*dt
-        ax.plot(time,
-            vlasov_energy_history,
-            color="black",
-            linewidth=1.5,
-        )
+        ax.plot(time, vlasov_energy_history, color="black", linewidth=1.5)
         ax.set_xlabel(r"$t$")
         ax.set_ylabel(r"$|\mathcal{V}(\theta)|$")
-        for spine in ax.spines.values():
-            spine.set_linewidth(0.8)
         ax.tick_params(which="both", direction="in", top=True, right=True)
-        fig.tight_layout(pad=0.2)
-        fig.savefig(f"output/test_8_output_cfmz_{collision_type}/vlasov_energy.pdf", bbox_inches="tight")
-        fig.savefig(f"output/test_8_output_cfmz_{collision_type}/vlasov_energy.png", dpi=400, bbox_inches="tight")
+        fig.savefig(f"output/test_8_output_cfmz_{collision_type}/vlasov_energy.pdf")
+        fig.savefig(f"output/test_8_output_cfmz_{collision_type}/vlasov_energy.png", dpi=400)
         plt.close(fig)
     return (L**2)*force.reshape(force.shape[0],1)
 

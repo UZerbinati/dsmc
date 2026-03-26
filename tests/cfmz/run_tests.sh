@@ -6,8 +6,8 @@
 
 set -eo pipefail
 
-NPROCS=5
-NLOCAL=10000000
+NPROCS=2
+NLOCAL=500000
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -34,6 +34,7 @@ run_test() {
 }
 
 for t in test_*.py; do
+    [[ "$t" == "test_0.py" || "$t" == "test_1.py" ]] && continue
     run_test "$t"
 done
 
