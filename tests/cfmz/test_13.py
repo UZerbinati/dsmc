@@ -54,8 +54,8 @@ Print(f"  seed={seed}")
 Print(f"  monitor_every={monitor_every}")
 Print(f"  extra_collision={extra_collision}")
 Print(f"  collision_type={collision_type}")
+Print(f"  cross_section=hard_needle")
 Print(f"  grazing_collision={grazing_collision}")
-Print(f"  cross_section=hard_needle  (kernel: L|sin(θ₁-θ₂)| · |g·n|)")
 
 Print("--------------------------------------------------------------------")
 

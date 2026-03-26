@@ -43,6 +43,7 @@ Print(f"  seed={seed}")
 Print(f"  monitor_every={monitor_every}")
 Print(f"  extra_collision={extra_collision}")
 Print(f"  collision_type={collision_type}")
+Print(f"  cross_section=maxwell")
 Print(f"  grazing_collision={grazing_collision}")
 
 Print("--------------------------------------------------------------------")
@@ -54,6 +55,7 @@ info = {"inertia": 1.0,
         "ev": 1.0,       # translational restitution
         "om": 1.0,       # rotational restitution
         "cutoff": 0.1,   # angular cutoff
+        "cross_section": "maxwell",
        }
 vlasov_energy_history = []
 
