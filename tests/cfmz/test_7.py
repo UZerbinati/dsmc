@@ -17,7 +17,7 @@ Print("Running homogeneous CFMZ needle DSMC with options:")
 
 nlocal = Opt.getReal("nlocal", 1e6)
 nlocal = int(nlocal)
-bins = Opt.getInt("bins", 128)
+bins = Opt.getInt("bins", 256)
 dt = Opt.getReal("dt", 0.05)
 nu = Opt.getReal("nu", 20)
 nsteps = Opt.getInt("nsteps", 4000)

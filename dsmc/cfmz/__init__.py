@@ -159,6 +159,7 @@ class CFMZNeedleDSMC:
         if interaction_energy is not None:
             self.history["interaction_energy"] = []
             self.history["total_energy"] = []
+            self.history["total_energy_rot"] = []
 
         self.output_path = f'{self.prefix}_output_cfmz_{self.collision_type}'
         if self.rank == 0:
@@ -170,7 +171,7 @@ class CFMZNeedleDSMC:
         self.swarm = self._create_swarm()
         
         from dsmc.plot import init_plot, plot_histograms, plot_history
-        from .transport import transport_step
+        from .transport import transport_step, vlasov_kick_step
         from .collision import nanbu_collision_step
         from .initial import initialize_particles
 
@@ -178,6 +179,7 @@ class CFMZNeedleDSMC:
         self.plot_histograms = plot_histograms.__get__(self)
         self.plot_history = plot_history.__get__(self)
         self.transport_step = transport_step.__get__(self)
+        self.vlasov_kick_step = vlasov_kick_step.__get__(self)
         self.nanbu_collision_step = nanbu_collision_step.__get__(self)
 
         self.initialize_particles()
@@ -309,7 +311,8 @@ class CFMZNeedleDSMC:
             E_int = self.interaction_energy(angle)
             L = self.info.get("length", 1.0)
             self.history["interaction_energy"].append(E_int)
-            self.history["total_energy"].append(global_energy_rot / global_n + 0.5 * L**2 * E_int)
+            self.history["total_energy"].append(global_energy / global_n + 0.5 * L**2 * E_int)
+            self.history["total_energy_rot"].append(global_energy_rot / global_n + 0.5 * L**2 * E_int)
         self.history["momentum_1"].append(np.linalg.norm(mean_u[0]))
         self.history["momentum_2"].append(np.linalg.norm(mean_u[1]))
         self.history["ang_momentum"].append(np.linalg.norm(mean_eta))
@@ -391,14 +394,15 @@ class CFMZNeedleDSMC:
         self.plot_histograms(prefix=f"{self.output_path}/dsmc_0")
         for step in range(1, nsteps + 1):
             if self.transport:
-                self.transport_step(dt=0.5*self.dt)
+                self.transport_step(dt=0.5*self.dt)          # half drift: D(dt/2)
+                self.vlasov_kick_step(dt=self.dt)             # full kick:  K(dt)
             for coll_index in range(self.extra_collision):
                 if self.collision_type == "nanbu":
                     self.nanbu_collision_step()
                 else:
                     raise ValueError(f"Unknown collision type: {self.collision_type}")
             if self.transport:
-                self.transport_step(dt=0.5*self.dt)
+                self.transport_step(dt=0.5*self.dt)          # half drift: D(dt/2)
             d = self.diagnostics(step=step)
             if self.rank == 0:
                 print(
