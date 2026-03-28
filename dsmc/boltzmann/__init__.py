@@ -54,6 +54,7 @@ class BoltzmannDSMC:
         opts: dict,
         info: dict = {},
         comm: MPI.Comm = MPI.COMM_WORLD,
+        mlmc_mode: bool = False,
     ):
         self.comm = comm
         self.rank = comm.Get_rank()
@@ -90,9 +91,10 @@ class BoltzmannDSMC:
         }
 
         self.output_path = f'{self.prefix}_output_boltzmann_{self.collision_type}'
-        if self.rank == 0:
-            os.makedirs(self.output_path, exist_ok=True)
-        self.comm.Barrier()
+        if not mlmc_mode:
+            if self.rank == 0:
+                os.makedirs(self.output_path, exist_ok=True)
+            self.comm.Barrier()
 
         self.dm = self._create_mesh()
         self.mesh_dim = self.dm.getDimension()
@@ -117,7 +119,8 @@ class BoltzmannDSMC:
         self.bgk_collision_step = bgk_collision_step.__get__(self)
 
         self.initialize_particles()
-        init_plot()
+        if not mlmc_mode:
+            init_plot()
 
     def _create_mesh(self):
         """Create the PETSc DMDA background mesh for the chosen test case.
@@ -178,7 +181,7 @@ class BoltzmannDSMC:
         self.delta_x = 2 * self.xlim / self.bins
         self.delta_y = 2 * self.ylim / self.bins
 
-    def diagnostics(self, step=0):
+    def diagnostics(self, step=0, write=True):
         """Compute and record global moments (called by all ranks).
 
         Computes the total particle count, mean translational velocity, total
@@ -217,7 +220,7 @@ class BoltzmannDSMC:
         self.history["momentum_1"].append(float(mean_u[0]))
         self.history["momentum_2"].append(float(mean_u[1]))
 
-        if self.rank == 0:
+        if write and self.rank == 0:
             with open(f'{self.output_path}/history.pickle', 'wb') as fp:
                 pickle.dump(self.history, fp)
 
@@ -227,6 +230,97 @@ class BoltzmannDSMC:
             "energy": global_energy,
             "temperature": temp,
         }
+
+    def get_state(self) -> dict:
+        """Return a snapshot of all particle data and the RNG state.
+
+        Returns a dict with keys ``coords`` (shape ``(nlocal, mesh_dim)``),
+        ``velocity`` (shape ``(nlocal, dim)``), ``weight`` (shape
+        ``(nlocal,)``), ``nlocal`` (int), and ``rng_state``.  All arrays are
+        deep copies — the caller owns them.
+        """
+        celldm = self.swarm.getCellDMActive()
+        coord_names = celldm.getCoordinateFields()
+        pos = self.swarm.getField(coord_names[0])
+        vel = self.swarm.getField("velocity")
+        wgt = self.swarm.getField("weight")
+
+        state = {
+            "coords":   pos.reshape(self.nlocal, self.mesh_dim).copy(),
+            "velocity": vel.reshape(self.nlocal, self.dim).copy(),
+            "weight":   wgt[:self.nlocal].copy(),
+            "nlocal":   self.nlocal,
+            "rng_state": self.rng.bit_generator.state,
+        }
+
+        self.swarm.restoreField(coord_names[0])
+        self.swarm.restoreField("velocity")
+        self.swarm.restoreField("weight")
+        return state
+
+    def set_state(self, state: dict) -> None:
+        """Overwrite particle data from a snapshot produced by :meth:`get_state`.
+
+        The swarm is resized to ``state["nlocal"]`` particles on this rank.
+        Coordinates are set via ``setPointCoordinates``, which assigns each
+        particle to its mesh cell.  Velocities and weights are written
+        directly to the swarm fields.  If ``state["rng_state"]`` is not
+        ``None`` the generator state is also restored.
+
+        Parameters
+        ----------
+        state : dict
+            Snapshot dict as returned by :meth:`get_state`.
+        """
+        n_new = state["nlocal"]
+        self.swarm.setLocalSizes(n_new, self.N)
+        self.swarm.setPointCoordinates(state["coords"])
+        self.nlocal = self.swarm.getLocalSize()
+
+        if self.nlocal != n_new:
+            raise RuntimeError(
+                f"set_state: particle migration during coordinate assignment "
+                f"(expected {n_new}, got {self.nlocal}).  "
+                "Ensure state particles are in this rank's spatial domain."
+            )
+
+        vel = self.swarm.getField("velocity")
+        vel[:] = state["velocity"]
+        self.swarm.restoreField("velocity")
+
+        wgt = self.swarm.getField("weight")
+        wgt[:] = state["weight"]
+        self.swarm.restoreField("weight")
+
+        if state.get("rng_state") is not None:
+            self.rng.bit_generator.state = state["rng_state"]
+
+    def run_silent(self, nsteps: int) -> None:
+        """Advance the simulation for ``nsteps`` steps without any I/O.
+
+        Identical to :meth:`run` but suppresses all file writes and plots.
+        Diagnostics are still computed every step and appended to
+        ``self.history`` in memory.  Used by the MLMC estimator to run
+        coupled fine/coarse pairs without filesystem contention.
+
+        Parameters
+        ----------
+        nsteps : int
+            Number of time steps to run.
+        """
+        self.diagnostics(step=0, write=False)
+        for step in range(1, nsteps + 1):
+            self.transport_step(dt=0.5 * self.dt)
+            for _ in range(self.extra_collision):
+                if self.collision_type == "nanbu":
+                    self.nanbu_collision_step()
+                elif self.collision_type == "bgk":
+                    self.bgk_collision_step()
+                else:
+                    raise ValueError(f"Unknown collision type: {self.collision_type}")
+            self.transport_step(dt=0.5 * self.dt)
+            self.diagnostics(step=step, write=False)
+            gc.collect()
 
     def run(self, nsteps: int, monitor_every: int = 10):
         """Advance the simulation for ``nsteps`` time steps.
