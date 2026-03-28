@@ -34,7 +34,6 @@ run_test() {
 }
 
 for t in test_*.py; do
-    [[ "$t" == "test_0.py" || "$t" == "test_1.py" ]] && continue
     run_test "$t"
 done
 

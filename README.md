@@ -30,6 +30,16 @@ the Vlasov torque F(θ) = −L² ∫ sign(sin(θ−θ')) cos(θ−θ') ρ(θ') d
 interaction energy E[ρ] = ∫∫ W ρ ρ dθ₁ dθ₂ and the total energy
 E_kin + E[ρ] are tracked and plotted alongside the kinetic observables.
 
+Tests 13–24 repeat tests 0–12 (where applicable) using the **hard-needle NTC
+cross-section** W = |g·n| · L|sin(Δθ)| (Onsager excluded-volume kernel,
+arXiv:2508.10744 Example B) instead of the Maxwell (uniform) kernel.  Bird's
+No-Time-Counter acceptance–rejection method is used: `nu` is the initial
+estimate of the running maximum ν_max, which adapts every step.  Test 11 has no
+counterpart because the cross-section is irrelevant when collisions are
+disabled; test 1 is already covered by test 13.
+
+#### Maxwell molecules (tests 0–12)
+
 | Test | IC | Vlasov force F(θ) | Notes |
 |---|---|---|---|
 | `test_0` | uniform | — | Pure collision, **no transport** |
@@ -39,13 +49,29 @@ E_kin + E[ρ] are tracked and plotted alongside the kinetic observables.
 | `test_4` | uniform | −sin(θ−θ_av) | Kuramoto meanfield |
 | `test_5` | perturbed | −sin(θ−θ_av) | Kuramoto meanfield, perturbed IC |
 | `test_6` | uniform | −sin(θ−θ_av) | Kuramoto meanfield, seed=49 |
-| `test_7` | uniform | −sin(θ−θ_av) |  Kuramoto meanfield, high ν=20 |
+| `test_7` | uniform | −sin(θ−θ_av) | Kuramoto meanfield, high ν=20 |
 | `test_8` | uniform | Onsager | ν=4, bins=128 |
 | `test_9` | uniform | Onsager | ν=0.5, bins=128 |
 | `test_10` | uniform | Onsager | ν=20, bins=128 |
 | `test_11` | uniform | Onsager | **No collisions** (pure Vlasov), bins=128 — energy conservation check |
 | `test_12` | perturbed | Onsager | ν=4, bins=128, perturbed IC |
-| `test_13` | uniform | — | **Hard-needle cross-section** (NTC): kernel W = \|g·n\| · L\|sin(Δθ)\|, arXiv:2508.10744 Example B |
+
+#### Hard-needle NTC cross-section (tests 13–24)
+
+| Test | Mirrors | IC | Vlasov force F(θ) | Notes |
+|---|---|---|---|---|
+| `test_13` | `test_1` | uniform | — | Baseline: collision + transport, ν=10 |
+| `test_14` | `test_0` | uniform | — | Pure collision, **no transport** |
+| `test_15` | `test_2` | uniform | −(θ−θ_av) | Quadratic, α=1 |
+| `test_16` | `test_3` | uniform | −4(θ−θ_av) | Quadratic, α=4 |
+| `test_17` | `test_4` | uniform | −sin(θ−θ_av) | Kuramoto meanfield |
+| `test_18` | `test_5` | perturbed | −sin(θ−θ_av) | Kuramoto meanfield, perturbed IC |
+| `test_19` | `test_6` | uniform | −sin(θ−θ_av) | Kuramoto meanfield, seed=49 |
+| `test_20` | `test_7` | uniform | −sin(θ−θ_av) | Kuramoto meanfield, high ν=20 |
+| `test_21` | `test_8` | uniform | Onsager | ν=4, bins=128 |
+| `test_22` | `test_9` | uniform | Onsager | ν=0.5, bins=128 |
+| `test_23` | `test_10` | uniform | Onsager | ν=20, bins=128 |
+| `test_24` | `test_12` | perturbed | Onsager | ν=4, bins=128, perturbed IC |
 
 ## Dependencies
 
@@ -96,7 +122,7 @@ dsmc/
   utils.py      Shared PETSc/MPI helpers and Matplotlib style defaults
 tests/
   boltzmann/    test_0–2 (Sod shock tube, Nanbu), test_3 (Sod, BGK), test_4–5 (cylinder flow)
-  cfmz/         test_0–13
+  cfmz/         test_0–24 (test_0–12: Maxwell; test_13–24: hard-needle NTC)
 ```
 
 ## Output
