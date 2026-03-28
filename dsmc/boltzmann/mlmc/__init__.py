@@ -207,6 +207,7 @@ class MLMCEstimator:
             "level_means": level_means,
             "level_vars":  level_vars_final,
             "total_cost":  total_cost,
+            "corrections": corrections,  # list[list[float]], one per level
         }
 
     # ------------------------------------------------------------------
@@ -252,13 +253,14 @@ class MLMCEstimator:
 
     def _run_single(self, seed: int) -> float:
         """Run one standalone level-0 simulation and return Q."""
-        opts = dict(self.opts_base)
-        opts["seed"] = seed
         sim = BoltzmannDSMC(
-            opts=opts, info=self.info, comm=self.comm, mlmc_mode=True
+            opts={**self.opts_base, "seed": seed},
+            info=self.info, comm=self.comm, mlmc_mode=True,
         )
-        sim.run_silent(self.nsteps)
-        q = self.qoi_fn(sim)
-        sim.swarm.destroy()
-        sim.dm.destroy()
-        return q
+        try:
+            sim.run_silent(self.nsteps)
+            return self.qoi_fn(sim)
+        finally:
+            # PETSc objects are not garbage-collected by Python
+            sim.swarm.destroy()
+            sim.dm.destroy()

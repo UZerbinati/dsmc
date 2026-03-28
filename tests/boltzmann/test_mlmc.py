@@ -25,7 +25,6 @@ from mpi4py import MPI
 
 from dsmc import BoltzmannDSMC, Print
 from dsmc.boltzmann.mlmc import MLMCEstimator
-from dsmc.boltzmann.mlmc.level_pair import CoupledLevelPair
 from dsmc.boltzmann.mlmc.qoi import FractionRightHalf
 
 comm = MPI.COMM_WORLD
@@ -127,27 +126,30 @@ Print(f"\n  MLMC estimate = {mlmc_estimate:.6f} ± {mlmc_se:.6f}")
 # ---------------------------------------------------------------------------
 # 3. Variance reduction check (coupled levels)
 # ---------------------------------------------------------------------------
+# Reuse corrections already collected by the MLMC run — no extra samples needed.
 Print(f"\n[3] Variance reduction check (coupled levels)...")
 if finest_level >= 1:
-    pair = CoupledLevelPair(
-        opts_base=opts_base,
-        level=finest_level,
-        info=info,
-        comm=comm,
-        qoi_fn=qoi_fn,
-        nsteps=nsteps,
-    )
+    # Run a small set of standalone fine-level samples to estimate Var(Q_fine),
+    # then compare against Var(Q_fine - Q_coarse) from the MLMC corrections.
     n_var_check = 20
-    q_fines, q_coarses, corrections = [], [], []
+    size = comm.Get_size()
+    q_fines = []
     for i in range(n_var_check):
-        seed_i = base_seed + 500_000_000 + i * comm.Get_size()
-        qf, qc = pair.run_sample(seed_i)
-        q_fines.append(qf)
-        q_coarses.append(qc)
-        corrections.append(qf - qc)
+        seed_i = base_seed + 500_000_000 + i * size
+        opts_fine_vc = {**opts_base, "nlocal": nlocal_finest, "seed": seed_i}
+        sim = BoltzmannDSMC(opts=opts_fine_vc, info=info, comm=comm, mlmc_mode=True)
+        try:
+            sim.run_silent(nsteps)
+            q_fines.append(qoi_fn(sim))
+        finally:
+            sim.swarm.destroy()
+            sim.dm.destroy()
 
-    var_fine       = float(np.var(q_fines,     ddof=1))
-    var_correction = float(np.var(corrections, ddof=1))
+    # Corrections at the finest level are already in the MLMC result
+    mlmc_corrections_finest = result["corrections"][finest_level]
+
+    var_fine       = float(np.var(q_fines,                  ddof=1))
+    var_correction = float(np.var(mlmc_corrections_finest,  ddof=1))
 
     Print(f"  Var(Q_fine)            = {var_fine:.4e}")
     Print(f"  Var(Q_fine - Q_coarse) = {var_correction:.4e}")

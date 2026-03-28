@@ -35,7 +35,7 @@ Print("Running homogeneous CFMZ needle DSMC — hard-needle cross-section (NTC):
 
 nlocal = Opt.getReal("nlocal", 1e6)
 nlocal = int(nlocal)
-bins = Opt.getInt("bins", 256)
+bins = Opt.getInt("bins", 512)
 dt = Opt.getReal("dt", 0.05)
 nu = Opt.getReal("nu", 10)
 nsteps = Opt.getInt("nsteps", 1000)

@@ -100,35 +100,27 @@ class CoupledLevelPair:
         -------
         (Q_fine, Q_coarse) : tuple of float
         """
-        # --- Fine simulation ---
-        opts_fine = dict(self.opts_fine)
-        opts_fine["seed"] = seed
         fine_sim = BoltzmannDSMC(
-            opts=opts_fine, info=self.info, comm=self.comm, mlmc_mode=True
+            opts={**self.opts_fine, "seed": seed},
+            info=self.info, comm=self.comm, mlmc_mode=True,
         )
-        fine_state = fine_sim.get_state()
-
-        # --- Coarse simulation ---
-        opts_coarse = dict(self.opts_coarse)
-        opts_coarse["seed"] = seed + _COARSE_SEED_OFFSET
-        coarse_sim = BoltzmannDSMC(
-            opts=opts_coarse, info=self.info, comm=self.comm, mlmc_mode=True
-        )
-        coarse_state = _split_state(fine_state)
-        coarse_sim.set_state(coarse_state)
-
-        # --- Run both ---
-        fine_sim.run_silent(self.nsteps)
-        coarse_sim.run_silent(self.nsteps)
-
-        # --- Extract QoI ---
-        Q_fine = self.qoi_fn(fine_sim)
-        Q_coarse = self.qoi_fn(coarse_sim)
-
-        # --- Destroy PETSc objects (no Python GC for C objects) ---
-        fine_sim.swarm.destroy()
-        fine_sim.dm.destroy()
-        coarse_sim.swarm.destroy()
-        coarse_sim.dm.destroy()
+        try:
+            coarse_sim = BoltzmannDSMC(
+                opts={**self.opts_coarse, "seed": seed + _COARSE_SEED_OFFSET},
+                info=self.info, comm=self.comm, mlmc_mode=True,
+            )
+            try:
+                coarse_sim.set_state(_split_state(fine_sim.get_state()))
+                fine_sim.run_silent(self.nsteps)
+                coarse_sim.run_silent(self.nsteps)
+                Q_fine   = self.qoi_fn(fine_sim)
+                Q_coarse = self.qoi_fn(coarse_sim)
+            finally:
+                # PETSc objects are not garbage-collected by Python
+                coarse_sim.swarm.destroy()
+                coarse_sim.dm.destroy()
+        finally:
+            fine_sim.swarm.destroy()
+            fine_sim.dm.destroy()
 
         return Q_fine, Q_coarse

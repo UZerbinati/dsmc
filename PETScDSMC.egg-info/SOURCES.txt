@@ -1,0 +1,9 @@
+README.md
+setup.py
+PETScDSMC.egg-info/PKG-INFO
+PETScDSMC.egg-info/SOURCES.txt
+PETScDSMC.egg-info/dependency_links.txt
+PETScDSMC.egg-info/requires.txt
+PETScDSMC.egg-info/top_level.txt
+dsmc/__init__.py
+dsmc/utils.py

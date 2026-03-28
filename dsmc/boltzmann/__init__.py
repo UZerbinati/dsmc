@@ -181,12 +181,12 @@ class BoltzmannDSMC:
         self.delta_x = 2 * self.xlim / self.bins
         self.delta_y = 2 * self.ylim / self.bins
 
-    def diagnostics(self, step=0, write=True):
+    def diagnostics(self, step=0):
         """Compute and record global moments (called by all ranks).
 
         Computes the total particle count, mean translational velocity, total
         kinetic energy, and temperature via MPI allreduce.  Results are appended
-        to ``self.history`` and the history dict is written to disk by rank 0.
+        to ``self.history``.
 
         Parameters
         ----------
@@ -220,16 +220,24 @@ class BoltzmannDSMC:
         self.history["momentum_1"].append(float(mean_u[0]))
         self.history["momentum_2"].append(float(mean_u[1]))
 
-        if write and self.rank == 0:
-            with open(f'{self.output_path}/history.pickle', 'wb') as fp:
-                pickle.dump(self.history, fp)
-
         return {
             "N": global_n,
             "mean_u": mean_u,
             "energy": global_energy,
             "temperature": temp,
         }
+
+    def _step(self):
+        """Advance one Strang-split time step (transport → collision → transport)."""
+        self.transport_step(dt=0.5 * self.dt)
+        for _ in range(self.extra_collision):
+            if self.collision_type == "nanbu":
+                self.nanbu_collision_step()
+            elif self.collision_type == "bgk":
+                self.bgk_collision_step()
+            else:
+                raise ValueError(f"Unknown collision type: {self.collision_type}")
+        self.transport_step(dt=0.5 * self.dt)
 
     def get_state(self) -> dict:
         """Return a snapshot of all particle data and the RNG state.
@@ -299,28 +307,18 @@ class BoltzmannDSMC:
         """Advance the simulation for ``nsteps`` steps without any I/O.
 
         Identical to :meth:`run` but suppresses all file writes and plots.
-        Diagnostics are still computed every step and appended to
-        ``self.history`` in memory.  Used by the MLMC estimator to run
-        coupled fine/coarse pairs without filesystem contention.
+        Used by the MLMC estimator to run coupled fine/coarse pairs without
+        filesystem contention.
 
         Parameters
         ----------
         nsteps : int
             Number of time steps to run.
         """
-        self.diagnostics(step=0, write=False)
+        self.diagnostics(step=0)
         for step in range(1, nsteps + 1):
-            self.transport_step(dt=0.5 * self.dt)
-            for _ in range(self.extra_collision):
-                if self.collision_type == "nanbu":
-                    self.nanbu_collision_step()
-                elif self.collision_type == "bgk":
-                    self.bgk_collision_step()
-                else:
-                    raise ValueError(f"Unknown collision type: {self.collision_type}")
-            self.transport_step(dt=0.5 * self.dt)
-            self.diagnostics(step=step, write=False)
-            gc.collect()
+            self._step()
+            self.diagnostics(step=step)
 
     def run(self, nsteps: int, monitor_every: int = 10):
         """Advance the simulation for ``nsteps`` time steps.
@@ -339,6 +337,8 @@ class BoltzmannDSMC:
         """
         d = self.diagnostics()
         if self.rank == 0:
+            with open(f'{self.output_path}/history.pickle', 'wb') as fp:
+                pickle.dump(self.history, fp)
             print(
                 f"[step 0] N={d['N']}, t=0.0 "
                 f"T={d['temperature']:.6e} "
@@ -349,17 +349,11 @@ class BoltzmannDSMC:
         self.plot_observables(prefix=f"{self.output_path}/dsmc_0")
         self.plot_velocity_histograms(prefix=f"{self.output_path}/dsmc_0")
         for step in range(1, nsteps + 1):
-            self.transport_step(dt=0.5 * self.dt)
-            for _ in range(self.extra_collision):
-                if self.collision_type == "nanbu":
-                    self.nanbu_collision_step()
-                elif self.collision_type == "bgk":
-                    self.bgk_collision_step()
-                else:
-                    raise ValueError(f"Unknown collision type: {self.collision_type}")
-            self.transport_step(dt=0.5 * self.dt)
+            self._step()
             d = self.diagnostics(step=step)
             if self.rank == 0:
+                with open(f'{self.output_path}/history.pickle', 'wb') as fp:
+                    pickle.dump(self.history, fp)
                 print(
                     f"[step {step}] N={d['N']}, t={step*self.dt:.6f} "
                     f"T={d['temperature']:.6e} "
@@ -371,4 +365,3 @@ class BoltzmannDSMC:
                 self.plot_velocity_histograms(prefix=f"{self.output_path}/dsmc_{step}")
                 if self.rank == 0:
                     self.plot_history(prefix=f"{self.output_path}/dsmc")
-            gc.collect()
