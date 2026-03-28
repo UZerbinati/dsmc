@@ -21,9 +21,9 @@ from dsmc.utils import fig_axes
 Opt = PETSc.Options()
 Print("Running homogeneous CFMZ needle DSMC with options:")
 
-nlocal = Opt.getReal("nlocal", 5e5)
+nlocal = Opt.getReal("nlocal", 1e6)
 nlocal = int(nlocal)
-bins = Opt.getInt("bins", 128)
+bins = Opt.getInt("bins", 256)
 dt = Opt.getReal("dt", 0.05)
 nu = Opt.getReal("nu", 20)
 nsteps = Opt.getInt("nsteps", 4000)
@@ -43,6 +43,7 @@ Print(f"  seed={seed}")
 Print(f"  monitor_every={monitor_every}")
 Print(f"  extra_collision={extra_collision}")
 Print(f"  collision_type={collision_type}")
+Print(f"  cross_section=maxwell")
 Print(f"  grazing_collision={grazing_collision}")
 
 Print("--------------------------------------------------------------------")
@@ -54,6 +55,7 @@ info = {"inertia": 1.0,
         "ev": 1.0,       # translational restitution
         "om": 1.0,       # rotational restitution
         "cutoff": 0.1,   # angular cutoff
+        "cross_section": "maxwell",
        }
 vlasov_energy_history = []
 
@@ -62,21 +64,36 @@ vlasov_energy_history = []
 _grid_centers = (np.arange(bins) + 0.5) * (2*np.pi / bins)
 _diff  = _grid_centers[:, None] - _grid_centers[None, :]   # (bins, bins)
 _K_mat = np.sign(np.sin(_diff)) * np.cos(_diff)             # (bins, bins)
+_W_mat = np.abs(np.sin(_diff))                              # (bins, bins) potential kernel
 
 comm = MPI.COMM_WORLD
+_delta_theta = 2*np.pi / bins
+_centers = (np.arange(bins) + 0.5) * _delta_theta
+
+def _cic_density(theta_local):
+    """Cloud-in-cell deposition: linear weights to two adjacent bins."""
+    t = theta_local.ravel() / _delta_theta
+    k = np.floor(t).astype(int) % bins
+    w2 = t - np.floor(t)          # weight for bin k+1
+    w1 = 1.0 - w2                 # weight for bin k
+    rho = np.zeros(bins)
+    np.add.at(rho, k,              w1)
+    np.add.at(rho, (k + 1) % bins, w2)
+    rho = comm.allreduce(rho, op=MPI.SUM)
+    rho /= (rho.sum() * _delta_theta)   # normalise: ∫ρ dθ = 1
+    return rho
+
 def vlasov_force(theta):
-    hist, theta_edges = np.histogram(theta.ravel(), bins=bins, range=(0.0, 2*np.pi))
-    hist = comm.allreduce(hist, op=MPI.SUM)
-    delta_theta = 2*np.pi / bins
-    rho = hist / (np.sum(hist) * delta_theta)
-    centers = 0.5 * (theta_edges[:-1] + theta_edges[1:])
+    rho = _cic_density(theta)
     # O(bins²) grid convolution — no O(N×bins) broadcast
-    F_grid = -delta_theta * (_K_mat @ rho)                  # (bins,)
+    W_grid = _delta_theta * (_W_mat @ rho)                  # (bins,) potential at grid points
     L = info["length"]
-    # Interpolate to particle positions: O(N log bins)
-    force = L**2 * np.interp(theta.ravel(), centers, F_grid, period=2*np.pi)
+    # Exact discrete gradient of E[ρ_CIC]: F(θ∈bin k) = L²(W_k − W_{k+1})/Δθ
+    k_idx = (np.floor(theta.ravel() / _delta_theta).astype(int)) % bins
+    force = L**2 * (W_grid[k_idx] - W_grid[(k_idx + 1) % bins]) / _delta_theta
+    V_grid = -_delta_theta * (_K_mat @ rho)                 # (bins,) Vlasov force V for monitoring only
     if comm.Get_rank() == 0:
-        vlasov_energy_history.append(np.sqrt(np.sum(F_grid**2) * delta_theta))
+        vlasov_energy_history.append(np.sqrt(np.sum(V_grid**2) * _delta_theta))
         fig, ax, _ = fig_axes()
         time = np.array(range(len(vlasov_energy_history)))*dt
         ax.plot(time, vlasov_energy_history, color="black", linewidth=1.5)
@@ -89,14 +106,10 @@ def vlasov_force(theta):
     return force.reshape(-1, 1)
 
 def interaction_energy_fn(theta):
-    """E[ρ] = ∫∫ |sin(θ₁−θ₂)| ρ(θ₁)ρ(θ₂) dθ₁dθ₂ via histogram quadrature."""
-    hist, _ = np.histogram(theta.ravel(), bins=bins, range=(0.0, 2*np.pi))
-    hist = comm.allreduce(hist, op=MPI.SUM)
-    delta_theta = 2*np.pi / bins
-    rho = hist / (np.sum(hist) * delta_theta)
-    centers = (np.arange(bins) + 0.5) * delta_theta
-    W = np.abs(np.sin(centers[:, None] - centers[None, :]))
-    return float(np.sum(W * rho[:, None] * rho[None, :]) * delta_theta**2)
+    """E[ρ] = ∫∫ |sin(θ₁−θ₂)| ρ(θ₁)ρ(θ₂) dθ₁dθ₂ via CIC quadrature."""
+    rho = _cic_density(theta)
+    W = np.abs(np.sin(_centers[:, None] - _centers[None, :]))
+    return float(np.sum(W * rho[:, None] * rho[None, :]) * _delta_theta**2)
 
 opts = {
     "nlocal": nlocal,

@@ -19,7 +19,9 @@ class CFMZNeedleDSMC:
       - angular velocity ω ∈ R
 
     Time stepping uses Strang splitting:
-      transport(dt/2) → Nanbu collision(s) → transport(dt/2).
+      [DKD](dt/2) → collision(s) → [DKD](dt/2)
+    i.e. D(dt/4)·K(dt/2)·D(dt/4) → collision → D(dt/4)·K(dt/2)·D(dt/4),
+    which is second-order symplectic for the combined Vlasov+collision system.
 
     The transport substep advances θ by ω·dt (plus an optional mean-field
     Vlasov torque) and wraps the angle back onto (0, 2π).  The collision
@@ -39,6 +41,14 @@ class CFMZNeedleDSMC:
         - ``test``            (str)   initial condition: ``"uniform_angle"``
                                       or ``"perturbed_uniform_angle"``.
         - ``collision_type``  (str)   only ``"nanbu"`` is implemented.
+        - ``nu``              (float) for ``cross_section="maxwell"`` this is
+                                      the exact collision frequency; the
+                                      constraint dt ≤ 1/ν is enforced.  For
+                                      ``"hard_needle"`` it is only the initial
+                                      estimate of the NTC running maximum
+                                      ``_nu_max``; a good choice is
+                                      ``nu ≈ L · v_max`` where ``v_max`` is
+                                      the expected maximum relative speed.
         - ``extra_collision`` (int)   collision sub-steps per time step; default 1.
         - ``variance``        (str)   circular variance geometry: ``"circle"``
                                       or ``"real_projective_plane"``; default ``"circle"``.
@@ -54,8 +64,23 @@ class CFMZNeedleDSMC:
         - ``inertia``  (float) moment of inertia I.
         - ``length``   (float) rod half-length L.
 
-        Optional keys: ``cutoff``, ``ev`` (translational restitution),
-        ``om`` (rotational restitution).
+        Optional keys:
+
+        - ``cutoff``        (float) angular cutoff for near-parallel detection;
+                                    default 0.1.
+        - ``ev``            (float) translational restitution; default 1.0.
+        - ``om``            (float) rotational restitution; default 1.0.
+        - ``cross_section`` (str)   collision kernel.  ``"maxwell"`` (default)
+                                    uses a uniform kernel — all pairs equally
+                                    likely, matching the classical Nanbu method.
+                                    ``"hard_needle"`` uses the Onsager
+                                    excluded-volume kernel
+                                    W = |g·n| · L|sin(θ₁−θ₂)| derived for
+                                    2-D calamitic needles in Example B of
+                                    arXiv:2508.10744; Bird's NTC
+                                    acceptance–rejection is applied each step
+                                    and the running maximum ``_nu_max`` adapts
+                                    automatically.
 
     vlasov_force : callable or None
         If provided, called as ``vlasov_force(angle)`` each transport
@@ -92,11 +117,18 @@ class CFMZNeedleDSMC:
         self.dim = 2
         self.nlocal = int(opts["nlocal"])
         self.N = self.nlocal * self.size
-        self.nu = opts.get("nu", 1.0)
-        self.dt = opts.get("dt", 1e-2)
-        if 1 / self.nu < self.dt:
-            raise RuntimeError("You have too large of a time-step for the collisional frequency you specified")
+        self.nu   = opts.get("nu", 1.0)
+        self.dt   = opts.get("dt", 1e-2)
         self.info = info
+        # For Maxwell molecules the dt ≤ 1/ν constraint must hold exactly.
+        # For hard_needle the NTC running maximum _nu_max handles the rate
+        # automatically, so the constraint is skipped (nu is only an initial
+        # estimate and _nu_max may exceed it).
+        if info.get("cross_section", "maxwell") == "maxwell" and 1 / self.nu < self.dt:
+            raise RuntimeError("You have too large of a time-step for the collisional frequency you specified")
+        # Running maximum collision rate for the NTC method (hard_needle).
+        # Initialised to nu; grows monotonically during the simulation.
+        self._nu_max = self.nu
         self.bins = opts.get("bins", 31)
         self.delta_bins = 1 / (self.bins + 1)
         self.test = opts.get("test", "uniform_angle")
@@ -129,6 +161,7 @@ class CFMZNeedleDSMC:
         if interaction_energy is not None:
             self.history["interaction_energy"] = []
             self.history["total_energy"] = []
+            self.history["total_energy_rot"] = []
 
         self.output_path = f'{self.prefix}_output_cfmz_{self.collision_type}'
         if self.rank == 0:
@@ -140,7 +173,7 @@ class CFMZNeedleDSMC:
         self.swarm = self._create_swarm()
         
         from dsmc.plot import init_plot, plot_histograms, plot_history
-        from .transport import transport_step
+        from .transport import transport_step, vlasov_kick_step
         from .collision import nanbu_collision_step
         from .initial import initialize_particles
 
@@ -148,6 +181,7 @@ class CFMZNeedleDSMC:
         self.plot_histograms = plot_histograms.__get__(self)
         self.plot_history = plot_history.__get__(self)
         self.transport_step = transport_step.__get__(self)
+        self.vlasov_kick_step = vlasov_kick_step.__get__(self)
         self.nanbu_collision_step = nanbu_collision_step.__get__(self)
 
         self.initialize_particles()
@@ -279,7 +313,8 @@ class CFMZNeedleDSMC:
             E_int = self.interaction_energy(angle)
             L = self.info.get("length", 1.0)
             self.history["interaction_energy"].append(E_int)
-            self.history["total_energy"].append(global_energy_rot / global_n + 0.5 * L**2 * E_int)
+            self.history["total_energy"].append(global_energy / global_n + 0.5 * L**2 * E_int)
+            self.history["total_energy_rot"].append(global_energy_rot / global_n + 0.5 * L**2 * E_int)
         self.history["momentum_1"].append(np.linalg.norm(mean_u[0]))
         self.history["momentum_2"].append(np.linalg.norm(mean_u[1]))
         self.history["ang_momentum"].append(np.linalg.norm(mean_eta))
@@ -337,8 +372,9 @@ class CFMZNeedleDSMC:
     def run(self, nsteps: int, monitor_every: int = 10):
         """Advance the simulation for ``nsteps`` time steps.
 
-        Each step uses Strang splitting:
-        ``transport(dt/2) → collision × extra_collision → transport(dt/2)``.
+        Each step uses second-order Strang splitting:
+        ``[DKD](dt/2) → collision × extra_collision → [DKD](dt/2)``
+        i.e. D(dt/4)·K(dt/2)·D(dt/4) → collisions → D(dt/4)·K(dt/2)·D(dt/4).
         Diagnostics are computed every step; plots are written every
         ``monitor_every`` steps and at the final step.
 
@@ -361,14 +397,18 @@ class CFMZNeedleDSMC:
         self.plot_histograms(prefix=f"{self.output_path}/dsmc_0")
         for step in range(1, nsteps + 1):
             if self.transport:
-                self.transport_step(dt=0.5*self.dt)
+                self.transport_step(dt=0.25*self.dt)         # D(dt/4)
+                self.vlasov_kick_step(dt=0.5*self.dt)        # K(dt/2)
+                self.transport_step(dt=0.25*self.dt)         # D(dt/4)
             for coll_index in range(self.extra_collision):
                 if self.collision_type == "nanbu":
                     self.nanbu_collision_step()
                 else:
                     raise ValueError(f"Unknown collision type: {self.collision_type}")
             if self.transport:
-                self.transport_step(dt=0.5*self.dt)
+                self.transport_step(dt=0.25*self.dt)         # D(dt/4)
+                self.vlasov_kick_step(dt=0.5*self.dt)        # K(dt/2)
+                self.transport_step(dt=0.25*self.dt)         # D(dt/4)
             d = self.diagnostics(step=step)
             if self.rank == 0:
                 print(

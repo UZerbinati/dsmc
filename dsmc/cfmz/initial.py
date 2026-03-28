@@ -80,12 +80,12 @@ def initialize_particles(self):
     self.swarm.restoreField("weight")
 
     #Change value for graphs
-    self.xlim = 4.0
-    self.ylim = 4.0
+    self.xlim = 8.0
+    self.ylim = 8.0
     self.angular_min = 0.0
     self.angular_max = 2*np.pi
-    self.omega_min = -4.0
-    self.omega_max = 4.0
+    self.omega_min = -8.0
+    self.omega_max = 8.0
     if self.angular_min > self.angular_max:
         raise RuntimeError("[!] Larger angular min than angular max.")
     if self.omega_min > self.omega_max:

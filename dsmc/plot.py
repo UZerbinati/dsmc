@@ -19,8 +19,23 @@ def plot_history(self, prefix=""):
         to_plot.append((self.history["energy"], r"$E_{\mathrm{kin}}$", "_energy"))
     if "interaction_energy" in self.history:
         to_plot.append((self.history["interaction_energy"], r"$\mathcal{E}[\rho]$", "_interaction_energy"))
-    if "total_energy" in self.history:
-        to_plot.append((self.history["total_energy"], r"$E_{\mathrm{kin,rot}}/N + \tfrac{L^2}{2}\,\mathcal{E}[\rho]$", "_total_energy"))
+    if "total_energy" in self.history and "total_energy_rot" in self.history:
+        fig, ax, _ = fig_axes()
+        time = np.array(self.history["step"]) * self.dt
+        ax.plot(time, np.array(self.history["total_energy"]),
+                color="black", linewidth=1.5, label=r"$E_{\mathrm{kin}} + \mathcal{E}[\rho]$")
+        ax.plot(time, np.array(self.history["total_energy_rot"]),
+                color="red", linewidth=1.5, linestyle="--",
+                label=r"$E_{\mathrm{kin,rot}} + \mathcal{E}[\rho]$")
+        ax.set_xlabel(r"$t$")
+        ax.set_ylabel(r"Energy")
+        ax.legend()
+        ax.tick_params(which="both", direction="in", top=True, right=True)
+        fig.savefig(f"{prefix}_total_energy.pdf")
+        fig.savefig(f"{prefix}_total_energy.png", dpi=400)
+        plt.close(fig)
+    elif "total_energy" in self.history:
+        to_plot.append((self.history["total_energy"], r"$E_{\mathrm{kin}} + \,\mathcal{E}[\rho]$", "_total_energy"))
     if "circular_var" in self.history:
         to_plot.append((self.history["circular_var"], r"$\mathrm{Var}(\theta)$", "_variance"))
 

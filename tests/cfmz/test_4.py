@@ -16,7 +16,7 @@ import numpy as np
 Opt = PETSc.Options()
 Print("Running homogeneous CFMZ needle DSMC with options:")
 
-nlocal = Opt.getReal("nlocal", 1e7)
+nlocal = Opt.getReal("nlocal", 1e6)
 nlocal = int(nlocal)
 bins = Opt.getInt("bins", 256)
 dt = Opt.getReal("dt", 0.05)
@@ -38,6 +38,7 @@ Print(f"  seed={seed}")
 Print(f"  monitor_every={monitor_every}")
 Print(f"  extra_collision={extra_collision}")
 Print(f"  collision_type={collision_type}")
+Print(f"  cross_section=maxwell")
 Print(f"  grazing_collision={grazing_collision}")
 
 Print("--------------------------------------------------------------------")
@@ -49,6 +50,7 @@ info = {"inertia": 1.0,
         "ev": 1.0,       # translational restitution
         "om": 1.0,       # rotational restitution
         "cutoff": 0.1,   # angular cutoff
+        "cross_section": "maxwell",
        }
 
 comm = MPI.COMM_WORLD
