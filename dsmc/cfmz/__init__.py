@@ -19,7 +19,9 @@ class CFMZNeedleDSMC:
       - angular velocity ω ∈ R
 
     Time stepping uses Strang splitting:
-      transport(dt/2) → Nanbu collision(s) → transport(dt/2).
+      [DKD](dt/2) → collision(s) → [DKD](dt/2)
+    i.e. D(dt/4)·K(dt/2)·D(dt/4) → collision → D(dt/4)·K(dt/2)·D(dt/4),
+    which is second-order symplectic for the combined Vlasov+collision system.
 
     The transport substep advances θ by ω·dt (plus an optional mean-field
     Vlasov torque) and wraps the angle back onto (0, 2π).  The collision
@@ -370,8 +372,9 @@ class CFMZNeedleDSMC:
     def run(self, nsteps: int, monitor_every: int = 10):
         """Advance the simulation for ``nsteps`` time steps.
 
-        Each step uses Strang splitting:
-        ``transport(dt/2) → collision × extra_collision → transport(dt/2)``.
+        Each step uses second-order Strang splitting:
+        ``[DKD](dt/2) → collision × extra_collision → [DKD](dt/2)``
+        i.e. D(dt/4)·K(dt/2)·D(dt/4) → collisions → D(dt/4)·K(dt/2)·D(dt/4).
         Diagnostics are computed every step; plots are written every
         ``monitor_every`` steps and at the final step.
 
@@ -394,15 +397,18 @@ class CFMZNeedleDSMC:
         self.plot_histograms(prefix=f"{self.output_path}/dsmc_0")
         for step in range(1, nsteps + 1):
             if self.transport:
-                self.transport_step(dt=0.5*self.dt)          # half drift: D(dt/2)
-                self.vlasov_kick_step(dt=self.dt)             # full kick:  K(dt)
+                self.transport_step(dt=0.25*self.dt)         # D(dt/4)
+                self.vlasov_kick_step(dt=0.5*self.dt)        # K(dt/2)
+                self.transport_step(dt=0.25*self.dt)         # D(dt/4)
             for coll_index in range(self.extra_collision):
                 if self.collision_type == "nanbu":
                     self.nanbu_collision_step()
                 else:
                     raise ValueError(f"Unknown collision type: {self.collision_type}")
             if self.transport:
-                self.transport_step(dt=0.5*self.dt)          # half drift: D(dt/2)
+                self.transport_step(dt=0.25*self.dt)         # D(dt/4)
+                self.vlasov_kick_step(dt=0.5*self.dt)        # K(dt/2)
+                self.transport_step(dt=0.25*self.dt)         # D(dt/4)
             d = self.diagnostics(step=step)
             if self.rank == 0:
                 print(

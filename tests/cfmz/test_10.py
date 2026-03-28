@@ -64,15 +64,14 @@ vlasov_energy_history = []
 _grid_centers = (np.arange(bins) + 0.5) * (2*np.pi / bins)
 _diff  = _grid_centers[:, None] - _grid_centers[None, :]   # (bins, bins)
 _K_mat = np.sign(np.sin(_diff)) * np.cos(_diff)             # (bins, bins)
+_W_mat = np.abs(np.sin(_diff))                              # (bins, bins) potential kernel
 
 comm = MPI.COMM_WORLD
 _delta_theta = 2*np.pi / bins
 _centers = (np.arange(bins) + 0.5) * _delta_theta
 
 def _cic_density(theta_local):
-    """Cloud-in-cell deposition: linear weights to two adjacent bins.
-    Consistent with the linear interpolation used for the force, making
-    the interpolated force the exact discrete gradient of E[ρ_CIC]."""
+    """Cloud-in-cell deposition: linear weights to two adjacent bins."""
     t = theta_local.ravel() / _delta_theta
     k = np.floor(t).astype(int) % bins
     w2 = t - np.floor(t)          # weight for bin k+1
@@ -87,12 +86,14 @@ def _cic_density(theta_local):
 def vlasov_force(theta):
     rho = _cic_density(theta)
     # O(bins²) grid convolution — no O(N×bins) broadcast
-    F_grid = -_delta_theta * (_K_mat @ rho)                 # (bins,)
+    W_grid = _delta_theta * (_W_mat @ rho)                  # (bins,) potential at grid points
     L = info["length"]
-    # Interpolate to particle positions: O(N log bins)
-    force = L**2 * np.interp(theta.ravel(), _centers, F_grid, period=2*np.pi)
+    # Exact discrete gradient of E[ρ_CIC]: F(θ∈bin k) = L²(W_k − W_{k+1})/Δθ
+    k_idx = (np.floor(theta.ravel() / _delta_theta).astype(int)) % bins
+    force = L**2 * (W_grid[k_idx] - W_grid[(k_idx + 1) % bins]) / _delta_theta
+    V_grid = -_delta_theta * (_K_mat @ rho)                 # (bins,) Vlasov force V for monitoring only
     if comm.Get_rank() == 0:
-        vlasov_energy_history.append(np.sqrt(np.sum(F_grid**2) * _delta_theta))
+        vlasov_energy_history.append(np.sqrt(np.sum(V_grid**2) * _delta_theta))
         fig, ax, _ = fig_axes()
         time = np.array(range(len(vlasov_energy_history)))*dt
         ax.plot(time, vlasov_energy_history, color="black", linewidth=1.5)
