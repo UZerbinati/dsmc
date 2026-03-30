@@ -56,6 +56,19 @@ class CFMZNeedleDSMC:
         - ``prefix``          (str)   path prefix for output directories.
         - ``transport``       (bool)  if ``False`` the transport substep is
                                       skipped entirely (pure collision); default ``True``.
+        - ``T_bath``          (float or None)  target temperature for the Andersen
+                                      thermostat.  ``None`` (default) disables the
+                                      thermostat entirely (microcanonical run).
+        - ``nu_bath``         (float) Andersen bath collision frequency; default 1.0.
+                                      Each particle is resampled from the Maxwellian
+                                      at ``T_bath`` with probability ``nu_bath·dt``
+                                      per step.  Set equal to ``nu`` for coupling
+                                      comparable to the physical collision rate.
+        - ``init_at_T_bath`` (bool)  If ``True`` (default) and ``T_bath`` is set,
+                                      initialise velocities from the Maxwellian at
+                                      ``T_bath`` so the simulation starts at the
+                                      target temperature.  Set to ``False`` to use
+                                      the default uniform IC regardless of ``T_bath``.
 
     info : dict
         Physical parameters.  Required keys:
@@ -140,6 +153,9 @@ class CFMZNeedleDSMC:
         self.vlasov_force = vlasov_force
         self.interaction_energy = interaction_energy
         self.transport = opts.get("transport", True)
+        self.T_bath       = opts.get("T_bath",       None)
+        self.nu_bath      = opts.get("nu_bath",      1.0)
+        self.init_at_T_bath = opts.get("init_at_T_bath", True)
         self.dump = "hist"
 
 
@@ -174,7 +190,7 @@ class CFMZNeedleDSMC:
         
         from dsmc.plot import init_plot, plot_histograms, plot_history
         from .transport import transport_step, vlasov_kick_step
-        from .collision import nanbu_collision_step
+        from .collision import nanbu_collision_step, andersen_thermostat_step
         from .initial import initialize_particles
 
         self.initialize_particles = initialize_particles.__get__(self)
@@ -183,6 +199,7 @@ class CFMZNeedleDSMC:
         self.transport_step = transport_step.__get__(self)
         self.vlasov_kick_step = vlasov_kick_step.__get__(self)
         self.nanbu_collision_step = nanbu_collision_step.__get__(self)
+        self.andersen_thermostat_step = andersen_thermostat_step.__get__(self)
 
         self.initialize_particles()
         init_plot() 
@@ -405,6 +422,8 @@ class CFMZNeedleDSMC:
                     self.nanbu_collision_step()
                 else:
                     raise ValueError(f"Unknown collision type: {self.collision_type}")
+            if self.T_bath is not None:
+                self.andersen_thermostat_step()
             if self.transport:
                 self.transport_step(dt=0.25*self.dt)         # D(dt/4)
                 self.vlasov_kick_step(dt=0.5*self.dt)        # K(dt/2)

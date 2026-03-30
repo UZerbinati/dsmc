@@ -1,12 +1,16 @@
 """
-Test with Vlasov force — Onsager potential
-------------------------------------------
-Mean-field interaction potential: W(θ₁, θ₂) = |sin(θ₁ − θ₂)|  (Onsager).
+Andersen thermostat — isothermal run, nematic phase
+----------------------------------------------------
+Same mean-field setup as test_12 (Onsager potential, L = √12, ν = 4)
+but with an Andersen thermostat fixing T_bath = 0.5.
 
-The Vlasov torque on a particle at θ is
-    F(θ) = −L² ∫ sign(sin(θ−θ')) cos(θ−θ') ρ(θ') dθ'
-and the interaction energy tracked by the library is
-    E[ρ] = ∫∫ |sin(θ₁−θ₂)| ρ(θ₁) ρ(θ₂) dθ₁ dθ₂.
+The dimensionless Onsager coupling at this temperature is
+    α = L² / T_bath = 12 / 0.5 = 24 ,
+far above the spinodal threshold α_c = 3π/2 ≈ 4.71, so the mean-field
+torque overcomes thermal fluctuations and nematic order emerges
+(circular_var → 0) while the thermostat keeps the temperature flat.
+
+Compare with test_25 (isotropic phase) and test_27 (full phase diagram).
 """
 import sys
 import petsc4py
@@ -19,19 +23,21 @@ import matplotlib.pyplot as plt
 from dsmc.utils import fig_axes
 
 Opt = PETSc.Options()
-Print("Running homogeneous CFMZ needle DSMC with options:")
+Print("Running isothermal CFMZ needle DSMC — nematic phase (Andersen thermostat):")
 
 nlocal = Opt.getReal("nlocal", 1e6)
 nlocal = int(nlocal)
 bins = Opt.getInt("bins", 256)
 dt = Opt.getReal("dt", 0.05)
-nu = Opt.getReal("nu", 20)
+nu = Opt.getReal("nu", 4)
 nsteps = Opt.getInt("nsteps", 1000)
 seed = Opt.getInt("seed", 47)
 grazing_collision = Opt.getBool("grazing_collision", False)
 collision_type = Opt.getString("collision_type", "nanbu")
-extra_collision = Opt.getInt("extra_collision", 0)+1
+extra_collision = Opt.getInt("extra_collision", 0) + 1
 monitor_every = Opt.getInt("monitor_every", 100)
+T_bath = Opt.getReal("T_bath", 0.5)
+nu_bath = Opt.getReal("nu_bath", 4.0)
 
 Print(f"  nlocal={nlocal}")
 Print(f"  nu={nu}")
@@ -45,68 +51,70 @@ Print(f"  extra_collision={extra_collision}")
 Print(f"  collision_type={collision_type}")
 Print(f"  cross_section=maxwell")
 Print(f"  grazing_collision={grazing_collision}")
+Print(f"  T_bath={T_bath}  (Andersen thermostat)")
+Print(f"  nu_bath={nu_bath}")
+Print(f"  Onsager coupling α = L²/T_bath = {12.0/T_bath:.3f}  (α_c ≈ 4.71)")
 
 Print("--------------------------------------------------------------------")
 
-#TODO: Fix with correct relation between length mass and inertia
 info = {"inertia": 1.0,
         "mass": 1.0,
         "length": np.sqrt(12.0),
-        "ev": 1.0,       # translational restitution
-        "om": 1.0,       # rotational restitution
-        "cutoff": 0.1,   # angular cutoff
+        "ev": 1.0,
+        "om": 1.0,
+        "cutoff": 0.1,
         "cross_section": "maxwell",
+        "initial_angle_amplitude": 1e-1,
+        "initial_angle_shift": -0.3,
+        "initial_angle_wavelength": 1,
        }
+
 vlasov_energy_history = []
 
-# Precompute kernel matrix K[k,j] = sign(sin(θ_k − θ_j)) cos(θ_k − θ_j)
-# on a uniform grid covering [0, 2π).  Computed once; reused every step.
 _grid_centers = (np.arange(bins) + 0.5) * (2*np.pi / bins)
-_diff  = _grid_centers[:, None] - _grid_centers[None, :]   # (bins, bins)
-_K_mat = np.sign(np.sin(_diff)) * np.cos(_diff)             # (bins, bins)
-_W_mat = np.abs(np.sin(_diff))                              # (bins, bins) potential kernel
+_diff  = _grid_centers[:, None] - _grid_centers[None, :]
+_K_mat = np.sign(np.sin(_diff)) * np.cos(_diff)
+_W_mat = np.abs(np.sin(_diff))
 
 comm = MPI.COMM_WORLD
 _delta_theta = 2*np.pi / bins
 _centers = (np.arange(bins) + 0.5) * _delta_theta
 
+output_dir = f"output/test_26_output_cfmz_{collision_type}"
+
 def _cic_density(theta_local):
-    """Cloud-in-cell deposition: linear weights to two adjacent bins."""
     t = theta_local.ravel() / _delta_theta
     k = np.floor(t).astype(int) % bins
-    w2 = t - np.floor(t)          # weight for bin k+1
-    w1 = 1.0 - w2                 # weight for bin k
+    w2 = t - np.floor(t)
+    w1 = 1.0 - w2
     rho = np.zeros(bins)
     np.add.at(rho, k,              w1)
     np.add.at(rho, (k + 1) % bins, w2)
     rho = comm.allreduce(rho, op=MPI.SUM)
-    rho /= (rho.sum() * _delta_theta)   # normalise: ∫ρ dθ = 1
+    rho /= (rho.sum() * _delta_theta)
     return rho
 
 def vlasov_force(theta):
     rho = _cic_density(theta)
-    # O(bins²) grid convolution — no O(N×bins) broadcast
-    W_grid = _delta_theta * (_W_mat @ rho)                  # (bins,) potential at grid points
+    W_grid = _delta_theta * (_W_mat @ rho)
     L = info["length"]
-    # Exact discrete gradient of E[ρ_CIC]: F(θ∈bin k) = L²(W_k − W_{k+1})/Δθ
     k_idx = (np.floor(theta.ravel() / _delta_theta).astype(int)) % bins
     force = L**2 * (W_grid[k_idx] - W_grid[(k_idx + 1) % bins]) / _delta_theta
-    V_grid = -_delta_theta * (_K_mat @ rho)                 # (bins,) Vlasov force V for monitoring only
+    V_grid = -_delta_theta * (_K_mat @ rho)
     if comm.Get_rank() == 0:
         vlasov_energy_history.append(np.sqrt(np.sum(V_grid**2) * _delta_theta))
         fig, ax, _ = fig_axes()
-        time = np.array(range(len(vlasov_energy_history)))*dt
+        time = np.array(range(len(vlasov_energy_history))) * dt
         ax.plot(time, vlasov_energy_history, color="black", linewidth=1.5)
         ax.set_xlabel(r"$t$")
         ax.set_ylabel(r"$|\mathcal{V}(\theta)|$")
         ax.tick_params(which="both", direction="in", top=True, right=True)
-        fig.savefig(f"output/test_10_output_cfmz_{collision_type}/vlasov_energy.pdf")
-        fig.savefig(f"output/test_10_output_cfmz_{collision_type}/vlasov_energy.png", dpi=400)
+        fig.savefig(f"{output_dir}/vlasov_energy.pdf")
+        fig.savefig(f"{output_dir}/vlasov_energy.png", dpi=400)
         plt.close(fig)
     return force.reshape(-1, 1)
 
 def interaction_energy_fn(theta):
-    """E[ρ] = ∫∫ |sin(θ₁−θ₂)| ρ(θ₁)ρ(θ₂) dθ₁dθ₂ via CIC quadrature."""
     rho = _cic_density(theta)
     W = np.abs(np.sin(_centers[:, None] - _centers[None, :]))
     return float(np.sum(W * rho[:, None] * rho[None, :]) * _delta_theta**2)
@@ -120,9 +128,11 @@ opts = {
     "grazing_collision": grazing_collision,
     "collision_type": collision_type,
     "seed": seed,
-    "test": "uniform_angle",
+    "test": "perturbed_uniform_angle",
     "variance": "real_projective_plane",
-    "prefix": "output/test_10",
+    "T_bath": T_bath,
+    "nu_bath": nu_bath,
+    "prefix": "output/test_26",
 }
 sim = CFMZNeedleDSMC(
     opts=opts,
@@ -133,4 +143,3 @@ sim = CFMZNeedleDSMC(
 )
 sim.run(nsteps=nsteps, monitor_every=monitor_every)
 Print("Simulation complete.")
-
