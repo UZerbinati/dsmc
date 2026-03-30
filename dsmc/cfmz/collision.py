@@ -193,3 +193,36 @@ def nanbu_collision_step(self):
     self.swarm.restoreField("velocity")
     self.swarm.restoreField("orientation")
     self.swarm.restoreField("angular_velocity")
+
+
+def andersen_thermostat_step(self):
+    """Andersen thermostat: randomly reset particle velocities to T_bath.
+
+    Each particle independently, with probability ``nu_bath * dt`` per
+    step, has its translational velocity **v** and angular velocity ω
+    resampled from the Maxwellian at the target temperature ``T_bath``:
+
+        v  ~ N(0, sqrt(T_bath / m))   (each Cartesian component)
+        ω  ~ N(0, sqrt(T_bath / I))
+
+    This implements the canonical heat bath of Andersen (1980), which
+    ensures the invariant measure is the NVT (canonical) ensemble at
+    ``T_bath``.  Orientations θ are not modified.
+
+    The step is a no-op when ``self.T_bath`` is ``None``.
+    """
+    if self.T_bath is None:
+        return
+    m = self.info["mass"]
+    I = self.info["inertia"]
+    vel   = self.swarm.getField("velocity").reshape(self.nlocal, self.dim)
+    omega = self.swarm.getField("angular_velocity").reshape(self.nlocal)
+
+    mask = self.rng.random(self.nlocal) < self.nu_bath * self.dt
+    n_reset = int(mask.sum())
+    if n_reset > 0:
+        vel[mask]   = self.rng.normal(0.0, np.sqrt(self.T_bath / m), (n_reset, self.dim))
+        omega[mask] = self.rng.normal(0.0, np.sqrt(self.T_bath / I), n_reset)
+
+    self.swarm.restoreField("velocity")
+    self.swarm.restoreField("angular_velocity")

@@ -71,8 +71,14 @@ def initialize_particles(self):
         angle[:,0] = _sample_perturbed_positions_1d(self, self.nlocal)
     else:
         raise RuntimeError("[!] How shell I initialise the angular data ?")
-    vel[:] = self.rng.uniform(size=(self.nlocal, 2), low=-0.5, high=0.5)
-    angular_vel[:] = self.rng.uniform(size=(self.nlocal, 1), low=-0.25, high=0.25)
+    if self.T_bath is not None and self.init_at_T_bath:
+        m = self.info["mass"]
+        I = self.info["inertia"]
+        vel[:]         = self.rng.normal(0.0, np.sqrt(self.T_bath / m), (self.nlocal, 2))
+        angular_vel[:] = self.rng.normal(0.0, np.sqrt(self.T_bath / I), (self.nlocal, 1))
+    else:
+        vel[:] = self.rng.uniform(size=(self.nlocal, 2), low=-0.5, high=0.5)
+        angular_vel[:] = self.rng.uniform(size=(self.nlocal, 1), low=-0.25, high=0.25)
     wgt[:] = 1.0
     self.swarm.restoreField("orientation")
     self.swarm.restoreField("velocity")
