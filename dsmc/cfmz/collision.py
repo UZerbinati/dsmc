@@ -84,9 +84,8 @@ def nanbu_collision_step(self):
     else:  # hard_needle — NTC: pool based on running maximum kernel value
         Mcol = int(0.5 * self._nu_max * self.nlocal * self.dt)
 
+    Mcol = min(Mcol, self.nlocal // 2)
     Mcol = Mcol if Mcol % 2 == 0 else Mcol - 1
-    if 2 * Mcol > self.nlocal:
-        Mcol = Mcol - 2
     if Mcol <= 0:
         self.swarm.restoreField("velocity")
         self.swarm.restoreField("orientation")

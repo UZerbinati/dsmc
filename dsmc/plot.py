@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import numpy as np
 import pickle
 from dsmc.utils import init_plot, pv_cmap, fig_axes
@@ -120,10 +121,13 @@ def plot_histograms(self, prefix=""):
     ax.set_xlim(-self.xlim, self.xlim)
     ax.set_ylim(-self.ylim, self.ylim)
     ax.tick_params(which="both", direction="in", top=True, right=True)
-    cbar = fig.colorbar(pcm, cax=cax)
-    cbar.set_label(r"$f(v)$")
-    fig.savefig(f"{prefix}_vel.pdf")
-    fig.savefig(f"{prefix}_vel.png", dpi=400)
+    cbar = fig.colorbar(pcm, cax=cax, format=mticker.ScalarFormatter(useMathText=True))
+    cbar.formatter.set_scientific(True)
+    cbar.formatter.set_powerlimits((-2, 2))
+    cbar.update_ticks()
+    #cbar.set_label(r"$f(v)$")
+    fig.savefig(f"{prefix}_vel.pdf", bbox_inches="tight")
+    fig.savefig(f"{prefix}_vel.png", dpi=400, bbox_inches="tight")
     plt.close(fig)
     if self.dump == "hist":
         with open(f"{prefix}_vel.pickle", "wb") as fp:
@@ -141,7 +145,7 @@ def plot_histograms(self, prefix=""):
     )
     ax.plot(xedges, Maxwellian[1], color="black", linewidth=1.5, label="Maxwellian")
     ax.set_xlabel(r"$v_x$")
-    ax.set_ylabel(r"$f(v_x)$")
+    #ax.set_ylabel(r"$f(v_x)$")
     ax.legend()
     ax.tick_params(which="both", direction="in", top=True, right=True)
     fig.savefig(f"{prefix}_vel_x.pdf")
@@ -160,7 +164,7 @@ def plot_histograms(self, prefix=""):
     )
     ax.plot(yedges, Maxwellian[2], color="black", linewidth=1.5, label="Maxwellian")
     ax.set_xlabel(r"$v_y$")
-    ax.set_ylabel(r"$f(v_y)$")
+    #ax.set_ylabel(r"$f(v_y)$")
     ax.legend()
     ax.tick_params(which="both", direction="in", top=True, right=True)
     fig.savefig(f"{prefix}_vel_y.pdf")
@@ -175,10 +179,13 @@ def plot_histograms(self, prefix=""):
     ax.set_xlim(self.angular_min, self.angular_max)
     ax.set_ylim(self.omega_min, self.omega_max)
     ax.tick_params(which="both", direction="in", top=True, right=True)
-    cbar = fig.colorbar(pcm, cax=cax)
-    cbar.set_label(r"$f(\theta,\omega)$")
-    fig.savefig(f"{prefix}_angular.pdf")
-    fig.savefig(f"{prefix}_angular.png", dpi=400)
+    cbar = fig.colorbar(pcm, cax=cax, format=mticker.ScalarFormatter(useMathText=True))
+    cbar.formatter.set_scientific(True)
+    cbar.formatter.set_powerlimits((-2, 2))
+    cbar.update_ticks()
+    #cbar.set_label(r"$f(\theta,\omega)$")
+    fig.savefig(f"{prefix}_angular.pdf", bbox_inches="tight")
+    fig.savefig(f"{prefix}_angular.png", dpi=400, bbox_inches="tight")
     plt.close(fig)
     if self.dump == "hist":
         with open(f"{prefix}_angular.pickle", "wb") as fp:
@@ -195,7 +202,7 @@ def plot_histograms(self, prefix=""):
         label="DSMC",
     )
     ax.set_xlabel(r"$\theta$")
-    ax.set_ylabel(r"$f(\theta)$")
+    #ax.set_ylabel(r"$f(\theta)$")
     ax.legend()
     mv = np.mean(H_theta)
     ymin = min(H_theta.min(), mv - 0.1)
@@ -356,9 +363,8 @@ def plot_cylinder_flow_observables(self, prefix=""):
         cbar = fig.colorbar(pcm, ax=ax, pad=0.02)
         cbar.ax.tick_params(labelsize=8)
         cbar.set_label(label, fontsize=10)
-        fig.tight_layout(pad=0.2)
-        fig.savefig(f"{prefix}{fname_suffix}.pdf", bbox_inches="tight")
-        fig.savefig(f"{prefix}{fname_suffix}.png", dpi=400, bbox_inches="tight")
+        fig.savefig(f"{prefix}{fname_suffix}.pdf")
+        fig.savefig(f"{prefix}{fname_suffix}.png", dpi=400)
         plt.close(fig)
 
     import pickle
@@ -395,8 +401,11 @@ def plot_velocity_histograms(self, prefix=""):
     ax.set_xlim(-self.xlim, self.xlim)
     ax.set_ylim(-self.ylim, self.ylim)
     ax.tick_params(which="both", direction="in", top=True, right=True)
-    cbar = fig.colorbar(pcm, cax=cax)
+    cbar = fig.colorbar(pcm, cax=cax, format=mticker.ScalarFormatter(useMathText=True))
+    cbar.formatter.set_scientific(True)
+    cbar.formatter.set_powerlimits((-2, 2))
+    cbar.update_ticks()
     cbar.set_label(r"$f(v)$")
-    fig.savefig(f"{prefix}_vel.pdf")
-    fig.savefig(f"{prefix}_vel.png", dpi=400)
+    fig.savefig(f"{prefix}_vel.pdf", bbox_inches="tight")
+    fig.savefig(f"{prefix}_vel.png", dpi=400, bbox_inches="tight")
     plt.close(fig)

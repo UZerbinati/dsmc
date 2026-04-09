@@ -94,8 +94,7 @@ def interaction_energy_fn(theta):
     return float(np.sum(W * rho[:, None] * rho[None, :]) * _delta_theta**2)
 
 # Temperature sweep: dense around T_c ≈ 2.55, coarser away from it.
-T_bath_values = [0.2, 0.4, 0.6, 0.8, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0]
-
+T_bath_values = [0.2, 0.4, 0.6, 0.8, 1.0, 1.5, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0]
 output_root = "output/test_27"
 if comm.Get_rank() == 0:
     os.makedirs(output_root, exist_ok=True)
@@ -103,61 +102,34 @@ comm.Barrier()
 
 circular_vars = []
 
-for T_b in T_bath_values:
-    Print(f"\n--- T_bath = {T_b:.2f}  (α = {12.0/T_b:.2f}) ---")
-    opts = {
-        "nlocal": nlocal,
-        "nu": nu,
-        "dt": dt,
-        "bins": bins,
-        "extra_collision": extra_collision,
-        "grazing_collision": False,
-        "collision_type": collision_type,
-        "seed": seed,
-        "test": "perturbed_uniform_angle",
-        "variance": "real_projective_plane",
-        "T_bath": T_b,
-        "nu_bath": nu_bath,
-        "prefix": f"{output_root}/T_{T_b:.2f}",
-    }
-    sim = CFMZNeedleDSMC(
-        opts=opts,
-        info=info,
-        vlasov_force=vlasov_force,
-        interaction_energy=interaction_energy_fn,
-        comm=MPI.COMM_WORLD,
-    )
-    sim.run(nsteps=nsteps, monitor_every=nsteps)
-    final_var = float(sim.history["circular_var"][-1])
-    circular_vars.append(final_var)
-    Print(f"    circular_var = {final_var:.4f}")
+if __name__ == '__main__':
+    for T_b in T_bath_values:
+        Print(f"\n--- T_bath = {T_b:.2f}  (α = {12.0/T_b:.2f}) ---")
+        opts = {
+            "nlocal": nlocal,
+            "nu": nu,
+            "dt": dt,
+            "bins": bins,
+            "extra_collision": extra_collision,
+            "grazing_collision": False,
+            "collision_type": collision_type,
+            "seed": seed,
+            "test": "perturbed_uniform_angle",
+            "variance": "real_projective_plane",
+            "T_bath": T_b,
+            "nu_bath": nu_bath,
+            "prefix": f"{output_root}/T_{T_b:.2f}",
+        }
+        sim = CFMZNeedleDSMC(
+            opts=opts,
+            info=info,
+            vlasov_force=vlasov_force,
+            interaction_energy=interaction_energy_fn,
+            comm=MPI.COMM_WORLD,
+        )
+        sim.run(nsteps=nsteps, monitor_every=nsteps)
+        final_var = float(sim.history["circular_var"][-1])
+        circular_vars.append(final_var)
+        Print(f"    circular_var = {final_var:.4f}")
 
-# ------------------------------------------------------------------ #
-# Phase diagram plot                                                   #
-# ------------------------------------------------------------------ #
-if comm.Get_rank() == 0:
-    T_c = 8.0 / np.pi   # spinodal estimate
-
-    fig, ax, _ = fig_axes()
-    ax.plot(T_bath_values, circular_vars, "o-", color="black",
-            linewidth=1.5, markersize=5, label=r"$\sigma^2$ (DSMC)")
-    ax.axvline(T_c, color="gray", linestyle="--", linewidth=1.0,
-               label=r"$T_c = 8/\pi \approx 2.55$ (spinodal)")
-    ax.set_xlabel(r"$T_{\mathrm{bath}}$")
-    ax.set_ylabel(r"circular variance $\sigma^2 = 1 - |\langle e^{2i\theta}\rangle|$")
-    ax.set_ylim(-0.05, 1.05)
-    ax.tick_params(which="both", direction="in", top=True, right=True)
-    ax.legend(frameon=False)
-
-    # annotate phases
-    ax.text(0.5, 0.08, "nematic", transform=ax.transAxes,
-            ha="left", va="bottom", fontsize=9, color="black")
-    ax.text(0.75, 0.92, "isotropic", transform=ax.transAxes,
-            ha="right", va="top", fontsize=9, color="black")
-
-    fig.savefig(f"{output_root}/phase_diagram.pdf")
-    fig.savefig(f"{output_root}/phase_diagram.png", dpi=400)
-    plt.close(fig)
-    Print(f"\nPhase diagram saved to {output_root}/phase_diagram.{{pdf,png}}")
-
-Print("Sweep complete.")
+    Print("Sweep complete.")

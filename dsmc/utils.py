@@ -33,7 +33,7 @@ def init_plot():
 # Fixed axes box dimensions (inches) shared by all plots.
 _AX_W,   _AX_H   = 4.0,  2.6
 _ML, _MR, _MT, _MB = 0.90, 0.30, 0.20, 0.68
-_CBAR_W, _CBAR_PAD  = 0.18, 0.10
+_CBAR_W, _CBAR_PAD, _MR_CBAR = 0.18, 0.10, 0.65
 
 def fig_axes(colorbar=False):
     """Return (fig, ax[, cax]) with a fixed axes box of _AX_W × _AX_H inches.
@@ -42,7 +42,7 @@ def fig_axes(colorbar=False):
     of whether a colorbar is present; the figure is simply made wider to
     accommodate it.
     """
-    r  = _MR + (_CBAR_PAD + _CBAR_W if colorbar else 0)
+    r  = ((_MR_CBAR + _CBAR_PAD + _CBAR_W) if colorbar else _MR)
     fw = _ML + _AX_W + r
     fh = _MT + _AX_H + _MB
     fig = plt.figure(figsize=(fw, fh))

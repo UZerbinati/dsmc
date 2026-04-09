@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 output_root    = sys.argv[1] if len(sys.argv) > 1 else "output/test_27"
 collision_type = sys.argv[2] if len(sys.argv) > 2 else "nanbu"
 
-T_bath_values = [0.2, 0.4, 0.6, 0.8, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0]
+from test_27 import T_bath_values
 T_c = 8.0 / np.pi   # spinodal estimate for L = sqrt(12)
 
 # ------------------------------------------------------------------ #
@@ -66,17 +66,17 @@ fig, ax = plt.subplots(figsize=(5, 3.5))
 ax.plot(T_found, circ_vars, "o-", color="black", linewidth=1.5, markersize=5,
         label=r"$\sigma^2$ (DSMC)")
 ax.axvline(T_c, color="gray", linestyle="--", linewidth=1.0,
-           label=rf"$T_c = 8/\pi \approx {T_c:.2f}$ (spinodal)")
+           label=rf"$T_c = 8/\pi \approx {T_c:.2f}$")
 
 ax.set_xlabel(r"$T_{\mathrm{bath}}$")
-ax.set_ylabel(r"circular variance $\sigma^2 = 1 - |\langle e^{2i\theta}\rangle|$")
+ax.set_ylabel(r"circular variance $\sigma^2$")
 ax.set_ylim(-0.05, 1.05)
 ax.tick_params(which="both", direction="in", top=True, right=True)
 ax.legend(frameon=False, fontsize=8)
 
 # Phase labels
 isotropic_x = (T_c + T_found.max()) / 2
-nematic_x   = (T_found.min() + T_c) / 2 - 0.4
+nematic_x   = (T_found.min() + T_c) / 2 - 0.5
 ax.text(isotropic_x, 0.92, "isotropic", ha="center", va="top",   fontsize=9, color="dimgray")
 ax.text(nematic_x,   0.15, "nematic",   ha="center", va="bottom", fontsize=9, color="dimgray")
 
