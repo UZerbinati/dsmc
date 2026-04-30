@@ -94,8 +94,8 @@ def interaction_energy_fn(theta):
     return float(np.sum(W * rho[:, None] * rho[None, :]) * _delta_theta**2)
 
 # Temperature sweep: dense around T_c ≈ 2.55, coarser away from it.
-T_bath_values = [0.2, 0.4, 0.6, 0.8, 1.0, 1.5, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0]
-output_root = "output/test_27"
+T_bath_values = [0.01, 0.05, 0.1, 0.15, 0.2, 0.4, 0.6, 0.8, 1.0, 1.5, 2.0]
+output_root = "output/test_28"
 if comm.Get_rank() == 0:
     os.makedirs(output_root, exist_ok=True)
 comm.Barrier()
@@ -117,6 +117,7 @@ if __name__ == '__main__':
             "test": "perturbed_uniform_angle",
             "variance": "real_projective_plane",
             "T_bath": T_b,
+            "transport": False,
             "nu_bath": nu_bath,
             "prefix": f"{output_root}/T_{T_b:.2f}",
         }
