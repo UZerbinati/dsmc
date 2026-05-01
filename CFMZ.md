@@ -518,3 +518,214 @@ with open("output/test_26_output_cfmz_nanbu/history.pickle", "rb") as f:
     h = pickle.load(f)
 # h["temperature"], h["circular_var"], h["total_energy"], ...
 ```
+
+---
+
+## 13. Discotic extension (`CFMZDiscDSMCHomo`)
+
+The CFMZ family is extended to **discotic** liquid crystals — 2-D
+disc-shaped (oblate-coin) particles whose orientation θ is the in-plane
+angle of a labelled axis on the disc.  Discotic particles are
+effectively 4-fold symmetric (rotation by π/2 returns an equivalent
+configuration), so their critical orientational order parameter is
+
+```
+R₄ = |⟨e^{4iθ}⟩|
+```
+
+rather than the rod's R₂.  Three things change relative to the
+calamitic (needle) solver: the **order-parameter family**, the
+**mean-field interaction kernel**, and — most consequentially — the
+**collision contact mechanics**.
+
+### 13.1 Order-parameter family
+
+The diagnostics now expose a generalised harmonic family
+
+```
+R_n = |⟨e^{i n θ}⟩|,   n ∈ {1, 2, 4, 6}
+```
+
+via the new opt ``opts["n_modes"]`` (default ``[2]`` to preserve the
+calamitic behaviour; ``CFMZDiscDSMCHomo`` overrides this default to
+``[1, 2, 4, 6]``).  Each requested harmonic gets its own history key
+``circular_var_n{n}``, and ``plot_history`` overlays them on a single
+``<prefix>_variance_modes`` figure.  The legacy
+``history["circular_var"]`` key is preserved untouched and continues
+to track whichever harmonic is selected by ``opts["variance"]``
+(``"circle"`` ⇒ R₁, ``"real_projective_plane"`` ⇒ R₂).
+
+For a discotic system one expects:
+
+| Phase | Signature |
+|---|---|
+| Isotropic | All R_n ≈ 0 |
+| Tetratic (4-fold orientational) | R₄ ≫ 0; R₁, R₂, R₆ ≈ 0 |
+| Hexatic (6-fold orientational) | R₆ ≫ 0 (special parameter regimes) |
+
+### 13.2 Onsager pair potential and Vlasov torque
+
+The 4-fold-symmetric Onsager-type potential is
+
+```
+W_disc(θ₁, θ₂) = |sin(2(θ₁ − θ₂))|
+```
+
+with minima at Δθ ∈ {0, π/2, π, 3π/2} (all equivalent under disc
+4-fold symmetry) and maxima at the 45° configurations.  The Vlasov
+torque is the discrete gradient of the CIC convolution V_eff = W_disc ∗ ρ,
+identical in form to the rod case (§5) — only the kernel matrix
+changes from ``|sin(Δθ)|`` to ``|sin(2 Δθ)|``.
+
+Linear stability of the uniform isotropic state ρ₀ = 1/(2π) gives the
+Fourier expansion
+
+```
+|sin 2x| = 2/π − (4/π) Σ_{m≥1} cos(4mx) / (4m²−1)
+```
+
+The unstable mode is **cos(4θ)** (rather than the calamitic cos(2θ));
+its dominant Fourier coefficient `−4/(3π)` matches the rod case so the
+spinodal is still at α_c = 3π/2 — but now α multiplies the discotic
+kernel and the order parameter that goes critical is R₄.
+
+The class auto-builds the ``vlasov_force`` and ``interaction_energy``
+callables from W_disc using the same CIC θ-grid machinery as
+``test_12.py`` (`_disc_onsager_factory` in ``dsmc/cfmz/disc.py``).
+Pass your own callables to override.
+
+### 13.3 Collision rule for discs — why and how it changes
+
+The needle collision kernel in ``dsmc/cfmz/collision.py`` treats each
+particle as a rigid **line of length 2L**.  The contact arm
+``r_i = ℓ ν_i`` with ``ℓ ∈ [0, L]`` is sampled along the rod axis,
+the contact-arm tip on rod j is fixed at ``r_j = L ν_j``, and the
+impulse denominator carries a moment-of-inertia term
+``(c_i² + c_j²)/I`` with ``c_k = r_k × n``.  Near-parallel pairs
+(|sin Δθ| ≈ 0) make this denominator near-singular and trigger a
+spherical-fallback branch.
+
+For a 2-D disc of radius R the geometry is fundamentally different:
+contact happens at the rim, on the line of centres.  The contact arm
+is no longer along the orientation axis but along the contact normal
+itself.  The lever arms vanish identically and the singular fallback
+disappears.
+
+**Hard-disc impulse derivation (`cross_section="hard_disc"`).**  Take
+two identical hard discs of radius R, mass m, moment of inertia
+I = m R²/2 (thin uniform disc).  At contact, their centres are 2R
+apart along the contact normal **n**.  Define the contact arms
+
+```
+r_i = -R n     (centre of i to contact point)
+r_j = +R n     (centre of j to contact point)
+```
+
+In 2-D the perpendicular operator sends `(x, y) → (-y, x)`, so
+`r_i⊥ = -R(-n_y, n_x)` and `r_j⊥ = +R(-n_y, n_x)`.  The relative
+contact velocity is
+
+```
+V = (v_i − v_j) + ω_i r_i⊥ − ω_j r_j⊥
+  = (v_i − v_j) − R(ω_i + ω_j)(-n_y, n_x).
+```
+
+The lever arms vanish identically:
+
+```
+c_i = r_i × n = -R(n_x n_y − n_y n_x) = 0,
+c_j = +R(n_x n_y − n_y n_x) = 0.
+```
+
+Therefore `V · n = (v_i − v_j) · n` — the relative-translational
+component along **n**, exactly as in spherical hard-disc dynamics.
+The impulse simplifies to
+
+```
+J = -(1 + e_v)(V · n) / (2/m)         [denom has no 1/I term]
+```
+
+and the post-collision update becomes
+
+```
+v_i' = v_i + (J/m) n,
+v_j' = v_j − (J/m) n,
+ω_i' = ω_i,                            [no change]
+ω_j' = ω_j.                            [no change]
+```
+
+**Two key consequences** for the kinetic theory:
+
+- **Angular momenta are conserved by collisions** for hard discs.
+  ω cannot equilibrate with v through the collision operator; it can
+  only be driven by the mean-field Vlasov torque (W_disc) and, if
+  active, the Andersen thermostat.  In an NVE run with no Vlasov
+  force the ω-distribution is a *frozen* invariant of the dynamics —
+  this is precisely what ``test_disc_0`` checks.
+- **No `cutoff` / spherical-fallback branch is needed.**  The
+  near-parallel singularity that motivated the rod's spherical
+  fallback never appears, because `(c_i² + c_j²)/I = 0` identically.
+
+**Oriented-disc kernel (`cross_section="oriented_disc"`).**  For
+problems where one wants ω to couple to v through the collisions —
+for instance to study ω-relaxation in NVE runs, or when modelling
+rectangular / square 4-fold particles rather than perfect discs — the
+solver also implements an **NTC kernel**
+
+```
+W(Ξ₁, Ξ₂) = |g·n| · S(θ₁, θ₂),   S = R |sin(2(θ₁ − θ₂))|
+```
+
+(the 4-fold analogue of the rod's `L |sin Δθ|`) with contact arms
+biased along the in-plane disc-plane direction
+**ν⊥** = (-sin θ, cos θ):
+
+```
+r_i = R ν_i⊥,       r_j = R ν_j⊥,
+c_k = r_k × n  ≠ 0  in general.
+```
+
+The lever arms are non-zero, and the rigid-body impulse
+denominator and J expression are exactly those of the rod kernel
+(see §6.1).  Bird's NTC acceptance–rejection is applied with running
+maximum ``self._nu_max`` updated each step, mirroring the rod
+``hard_needle`` path.
+
+### 13.4 Cross-section summary
+
+Set via ``info["cross_section"]``:
+
+| Value | Cross-section weight | Acceptance | Effect on ω |
+|---|---|---|---|
+| ``"maxwell"`` | flat (synonym for ``hard_disc`` here) | flat | none |
+| ``"hard_disc"`` *(default)* | flat (geometric) | flat | **none** — angular momenta conserved by collisions |
+| ``"oriented_disc"`` | ``R · |sin(2 Δθ)|`` (4-fold Onsager) | NTC w/p `S \|g·n\| / ν_max` | full rigid-body impulse, ω updated |
+
+### 13.5 What stays the same
+
+- ``andersen_thermostat_step`` (resamples v, ω from the Maxwellian
+  at T_bath) is reused unchanged from the parent class.
+- ``transport_step`` (drift) and ``vlasov_kick_step`` (kick) are
+  reused unchanged.
+- The Strang DKD splitting in ``run()`` is reused unchanged.
+
+### 13.6 New options
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| ``opts["n_modes"]`` | list[int] | ``[2]`` (parent), ``[1,2,4,6]`` (disc) | Harmonics to track in diagnostics.  Each ``n`` produces a ``circular_var_n{n}`` history key. |
+| ``info["radius"]`` | float | ``info.get("length", 1.0)`` | Disc radius R; used for contact arms in the disc collision kernel. |
+| ``info["cross_section"]`` | str | ``"hard_disc"`` (disc) | One of ``"hard_disc"``, ``"oriented_disc"``, ``"maxwell"``. |
+
+### 13.7 Test index — discotic homogeneous
+
+All under ``tests/cfmz/`` with ``from dsmc import CFMZDiscDSMCHomo``:
+
+| Test | Setup | Checks |
+|------|-------|--------|
+| ``test_disc_0`` | No Vlasov, ``hard_disc``, no thermostat | E conserved; ω-distribution unchanged shape; R_n ≈ 0 |
+| ``test_disc_1`` | Auto disc Onsager, ``hard_disc``, NVE, perturbed θ ~ cos(4θ) | R₄ grows from 0; total E conserved; R₂ stays ≈ 0 |
+| ``test_disc_2`` | Auto disc Onsager + Andersen, T_bath = 8.0 (α ≪ α_c) | All R_n < 0.1; T → T_bath |
+| ``test_disc_3`` | Auto disc Onsager + Andersen, T_bath = 0.5 (α ≫ α_c) | R₄ → > 0.9; R₁, R₂, R₆ < 0.1 |
+| ``test_disc_4`` | T_bath sweep over 0.2–8.0; phase-diagram analog of ``test_27`` | R₄(T_bath) drops near α_c |
+| ``test_disc_5`` | Same as ``test_disc_3``; sanity check on R₁ and R₆ | R₁, R₆ ≪ R₄ throughout |

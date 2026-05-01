@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
 import pickle
+import re
 from dsmc.utils import init_plot, pv_cmap, fig_axes
 
 
@@ -10,6 +11,12 @@ def plot_history(self, prefix=""):
 
     One figure per quantity is saved as ``<prefix>_<quantity>.pdf/png``.
     Only quantities present in ``self.history`` are plotted.
+
+    The function additionally sweeps ``self.history`` for keys matching
+    ``circular_var_n{n}`` and overlays them on a single
+    ``<prefix>_variance_modes.pdf/png`` figure (one curve per harmonic
+    n).  Useful for the discotic solver, which tracks R₁, R₂, R₄, R₆
+    simultaneously.
     """
     time = np.array(self.history["step"]) * self.dt
 
@@ -48,6 +55,26 @@ def plot_history(self, prefix=""):
         ax.tick_params(which="both", direction="in", top=True, right=True)
         fig.savefig(f"{prefix}{fname_suffix}.pdf")
         fig.savefig(f"{prefix}{fname_suffix}.png", dpi=400)
+        plt.close(fig)
+
+    # Multi-harmonic order parameters: R_n curves on a single axis.
+    mode_re = re.compile(r"^circular_var_n(\d+)$")
+    mode_keys = sorted(
+        ((int(m.group(1)), key) for key in self.history.keys() if (m := mode_re.match(key))),
+        key=lambda t: t[0],
+    )
+    if mode_keys:
+        fig, ax, _ = fig_axes()
+        for n, key in mode_keys:
+            ax.plot(time, 1.0 - np.array(self.history[key]),
+                    linewidth=1.5, label=fr"$R_{{{n}}}$")
+        ax.set_xlabel(r"$t$")
+        ax.set_ylabel(r"$R_n = |\langle e^{i n \theta}\rangle|$")
+        ax.set_ylim(-0.05, 1.05)
+        ax.legend()
+        ax.tick_params(which="both", direction="in", top=True, right=True)
+        fig.savefig(f"{prefix}_variance_modes.pdf")
+        fig.savefig(f"{prefix}_variance_modes.png", dpi=400)
         plt.close(fig)
 
 
@@ -374,6 +401,146 @@ def plot_cylinder_flow_observables(self, prefix=""):
             "y": 0.5 * (edges_y[:-1] + edges_y[1:]),
             "rho": rho, "ux": ux, "uy": uy, "temp": temp,
         }, fp)
+
+
+# ---------------------------------------------------------------------------
+# CFMZ non-homogeneous spatial profiles
+# ---------------------------------------------------------------------------
+
+def plot_cfmz_observables(self, prefix=""):
+    """Spatial profiles of ρ(x), u(x), T(x), nematic order S(x).
+
+    Reduces per-cell counts and weighted moments via MPI allreduce, then on
+    rank 0 saves PDF/PNG plots and a pickle of the profiles.  Falls back to a
+    single panel per quantity for the 1-D case; for 2-D the same quantities
+    are plotted as 2-D heat maps.
+    """
+    from mpi4py import MPI
+
+    if self.nlocal == 0:
+        # Still need to participate in the allreduce so collective ops sync.
+        n_x = len(self.edges_x) - 1
+        n_y = (len(self.edges_y) - 1) if self.spatial_dim == 2 else 1
+        zero = np.zeros((n_x, n_y), dtype=np.float64) if self.spatial_dim == 2 else np.zeros(n_x)
+        local_counts = zero.copy()
+        local_vx = zero.copy()
+        local_vy = zero.copy()
+        local_ke = zero.copy()
+        local_re = zero.copy()
+        local_im = zero.copy()
+    else:
+        celldm = self.swarm.getCellDMActive()
+        coord_names = celldm.getCoordinateFields()
+        pos = self.swarm.getField(coord_names[0])
+        vel = self.swarm.getField("velocity")
+        angle = self.swarm.getField("orientation")
+
+        X = pos.reshape(self.nlocal, self.mesh_dim).copy()
+        V = vel.reshape(self.nlocal, self.dim).copy()
+        theta = angle.reshape(self.nlocal).copy()
+
+        self.swarm.restoreField(coord_names[0])
+        self.swarm.restoreField("velocity")
+        self.swarm.restoreField("orientation")
+
+        # Nematic director uses 2θ so π-equivalent rod orientations align.
+        z2 = np.exp(2j * theta)
+
+        if self.spatial_dim == 1:
+            xpos = X[:, 0]
+            edges = self.edges_x
+            local_counts = np.histogram(xpos, bins=edges)[0].astype(float)
+            local_vx = np.histogram(xpos, bins=edges, weights=V[:, 0])[0]
+            local_vy = np.histogram(xpos, bins=edges, weights=V[:, 1])[0]
+            local_ke = np.histogram(xpos, bins=edges, weights=V[:, 0] ** 2 + V[:, 1] ** 2)[0]
+            local_re = np.histogram(xpos, bins=edges, weights=z2.real)[0]
+            local_im = np.histogram(xpos, bins=edges, weights=z2.imag)[0]
+        else:
+            xpos = X[:, 0]
+            ypos = X[:, 1]
+            ex, ey = self.edges_x, self.edges_y
+            local_counts, _, _ = np.histogram2d(xpos, ypos, bins=(ex, ey))
+            local_vx, _, _ = np.histogram2d(xpos, ypos, bins=(ex, ey), weights=V[:, 0])
+            local_vy, _, _ = np.histogram2d(xpos, ypos, bins=(ex, ey), weights=V[:, 1])
+            local_ke, _, _ = np.histogram2d(xpos, ypos, bins=(ex, ey), weights=V[:, 0] ** 2 + V[:, 1] ** 2)
+            local_re, _, _ = np.histogram2d(xpos, ypos, bins=(ex, ey), weights=z2.real)
+            local_im, _, _ = np.histogram2d(xpos, ypos, bins=(ex, ey), weights=z2.imag)
+
+    g_counts = self.comm.allreduce(local_counts, op=MPI.SUM)
+    g_vx = self.comm.allreduce(local_vx, op=MPI.SUM)
+    g_vy = self.comm.allreduce(local_vy, op=MPI.SUM)
+    g_ke = self.comm.allreduce(local_ke, op=MPI.SUM)
+    g_re = self.comm.allreduce(local_re, op=MPI.SUM)
+    g_im = self.comm.allreduce(local_im, op=MPI.SUM)
+
+    if self.rank != 0:
+        return
+
+    safe = np.where(g_counts > 0, g_counts, 1.0)
+    mass = self.info["mass"]
+
+    if self.spatial_dim == 1:
+        Lx = self.info["Lx"]
+        rho_x = (g_counts / max(self.N, 1)) * (self.bins / Lx) * self.info["norm_rho"]
+        vel_x = g_vx / safe
+        temp_x = mass * g_ke / safe - mass * (vel_x ** 2 + (g_vy / safe) ** 2)
+        S_x = np.sqrt((g_re / safe) ** 2 + (g_im / safe) ** 2)
+
+        x_centers = 0.5 * (self.edges_x[:-1] + self.edges_x[1:])
+
+        for data, ylabel, fname in [
+            (rho_x, r"$\rho$", f"{prefix}_density.pdf"),
+            (vel_x, r"$u_x$", f"{prefix}_velocity.pdf"),
+            (temp_x, r"$T$", f"{prefix}_temperature.pdf"),
+            (S_x, r"$S$", f"{prefix}_nematic.pdf"),
+        ]:
+            fig, ax, _ = fig_axes()
+            ax.plot(x_centers, data, color="black")
+            ax.set_xlabel(r"$x$")
+            ax.set_ylabel(ylabel)
+            ax.tick_params(which="both", direction="in", top=True, right=True)
+            fig.savefig(fname)
+            fig.savefig(fname.replace(".pdf", ".png"), dpi=400)
+            plt.close(fig)
+
+        with open(f"{prefix}_observables.pickle", "wb") as fp:
+            pickle.dump({"x": x_centers, "rho": rho_x, "vel_x": vel_x,
+                         "temp": temp_x, "nematic": S_x}, fp)
+    else:
+        ux = g_vx / safe
+        uy = g_vy / safe
+        speed = np.sqrt(ux ** 2 + uy ** 2)
+        cell_area = (self.edges_x[1] - self.edges_x[0]) * (self.edges_y[1] - self.edges_y[0])
+        rho = g_counts / (max(g_counts.sum(), 1) * cell_area)
+        temp = mass * g_ke / safe - mass * (ux ** 2 + uy ** 2)
+        temp = np.where(g_counts > 1, temp, 0.0)
+        S = np.sqrt((g_re / safe) ** 2 + (g_im / safe) ** 2)
+
+        ex, ey = self.edges_x, self.edges_y
+        for data, label, suffix in [
+            (rho.T, r"$\rho$", "_density"),
+            (speed.T, r"$|u|$", "_speed"),
+            (temp.T, r"$T$", "_temperature"),
+            (S.T, r"$S$", "_nematic"),
+        ]:
+            fig, ax = plt.subplots(figsize=(8, 4))
+            pcm = ax.pcolormesh(ex, ey, data, cmap=pv_cmap, shading="auto", rasterized=True)
+            ax.set_xlabel(r"$x$")
+            ax.set_ylabel(r"$y$")
+            ax.set_aspect("equal")
+            ax.tick_params(which="both", direction="in", top=True, right=True)
+            cbar = fig.colorbar(pcm, ax=ax, pad=0.02)
+            cbar.set_label(label, fontsize=10)
+            fig.savefig(f"{prefix}{suffix}.pdf")
+            fig.savefig(f"{prefix}{suffix}.png", dpi=400)
+            plt.close(fig)
+
+        with open(f"{prefix}_observables.pickle", "wb") as fp:
+            pickle.dump({
+                "x": 0.5 * (ex[:-1] + ex[1:]),
+                "y": 0.5 * (ey[:-1] + ey[1:]),
+                "rho": rho, "ux": ux, "uy": uy, "temp": temp, "nematic": S,
+            }, fp)
 
 
 def plot_velocity_histograms(self, prefix=""):

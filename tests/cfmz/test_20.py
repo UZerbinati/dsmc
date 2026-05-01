@@ -19,7 +19,7 @@ import petsc4py
 petsc4py.init(sys.argv)
 from petsc4py import PETSc
 from mpi4py import MPI
-from dsmc import CFMZNeedleDSMC, Print
+from dsmc import CFMZNeedleDSMCHomo as CFMZNeedleDSMC, Print
 import numpy as np
 
 Opt = PETSc.Options()
