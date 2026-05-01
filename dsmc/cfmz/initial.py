@@ -23,11 +23,10 @@ def _sample_perturbed_positions_1d(self, N):
     midpoints = 0.5 * (xmesh[1:] + xmesh[:-1])
     deltas = midpoints[1] - midpoints[0]
 
-    # density f(x) = 1 + A cos(k x)
+    # density f(x) = 1 + A cos(k x); ∫₀^{2π} f dθ = 2π for integer k.
     fx = 1.0 + amp * np.cos(k * midpoints + shift)
 
-    # same normalization as in MATLAB
-    cell_area = fx * deltas / (2.0 * np.pi / k)
+    cell_area = fx * deltas / (2.0 * np.pi)
 
     counts = cell_area * N
     N_cell = np.floor(counts).astype(np.int64)

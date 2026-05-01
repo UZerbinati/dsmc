@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
 import pickle
+import re
 from dsmc.utils import init_plot, pv_cmap, fig_axes
 
 
@@ -10,6 +11,12 @@ def plot_history(self, prefix=""):
 
     One figure per quantity is saved as ``<prefix>_<quantity>.pdf/png``.
     Only quantities present in ``self.history`` are plotted.
+
+    The function additionally sweeps ``self.history`` for keys matching
+    ``circular_var_n{n}`` and overlays them on a single
+    ``<prefix>_variance_modes.pdf/png`` figure (one curve per harmonic
+    n).  Useful for the discotic solver, which tracks R₁, R₂, R₄, R₆
+    simultaneously.
     """
     time = np.array(self.history["step"]) * self.dt
 
@@ -48,6 +55,26 @@ def plot_history(self, prefix=""):
         ax.tick_params(which="both", direction="in", top=True, right=True)
         fig.savefig(f"{prefix}{fname_suffix}.pdf")
         fig.savefig(f"{prefix}{fname_suffix}.png", dpi=400)
+        plt.close(fig)
+
+    # Multi-harmonic order parameters: R_n curves on a single axis.
+    mode_re = re.compile(r"^circular_var_n(\d+)$")
+    mode_keys = sorted(
+        ((int(m.group(1)), key) for key in self.history.keys() if (m := mode_re.match(key))),
+        key=lambda t: t[0],
+    )
+    if mode_keys:
+        fig, ax, _ = fig_axes()
+        for n, key in mode_keys:
+            ax.plot(time, 1.0 - np.array(self.history[key]),
+                    linewidth=1.5, label=fr"$R_{{{n}}}$")
+        ax.set_xlabel(r"$t$")
+        ax.set_ylabel(r"$R_n = |\langle e^{i n \theta}\rangle|$")
+        ax.set_ylim(-0.05, 1.05)
+        ax.legend()
+        ax.tick_params(which="both", direction="in", top=True, right=True)
+        fig.savefig(f"{prefix}_variance_modes.pdf")
+        fig.savefig(f"{prefix}_variance_modes.png", dpi=400)
         plt.close(fig)
 
 

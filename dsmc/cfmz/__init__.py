@@ -146,6 +146,7 @@ class CFMZNeedleDSMCHomo:
         self.delta_bins = 1 / (self.bins + 1)
         self.test = opts.get("test", "uniform_angle")
         self.variance = opts.get("variance", "circle")
+        self.n_modes = [int(n) for n in opts.get("n_modes", [2])]
         self.prefix = opts.get("prefix", "")
         self.extra_collision = opts.get("extra_collision", 1)
         self.grazing_collision = opts.get("grazing_collision", False)
@@ -174,6 +175,8 @@ class CFMZNeedleDSMCHomo:
             "ang_momentum": [],
             "circular_var": [],
         }
+        for n in self.n_modes:
+            self.history[f"circular_var_n{n}"] = []
         if interaction_energy is not None:
             self.history["interaction_energy"] = []
             self.history["total_energy"] = []
@@ -284,45 +287,61 @@ class CFMZNeedleDSMCHomo:
         local_energy = (0.5 * self.info["mass"] * np.sum(vel * vel) +
                         local_energy_rot)
 
-        #Circular stats
+        # Legacy circular variance — drives ``history["circular_var"]``.
+        # ``"circle"``                ⇒ R₁ = |⟨e^{iθ}⟩|     (polar)
+        # ``"real_projective_plane"`` ⇒ R₂ = |⟨e^{2iθ}⟩|    (nematic)
         if self.variance == "circle":
-            z = np.exp(1j * angle)
+            legacy_n = 1
         elif self.variance == "real_projective_plane":
-            z = np.exp(2j * np.mod(angle, np.pi))
+            legacy_n = 2
         else:
             raise RuntimeError(f"[!] Do not know how to compute the variance for {self.variance}")
-        local_z_sum = np.sum(z)
+
+        # Generalised harmonic family — ``history["circular_var_n{n}"]``.
+        # The user-supplied ``n_modes`` list is unioned with ``legacy_n``
+        # so the legacy key always has a corresponding harmonic computed.
+        modes = list(self.n_modes)
+        if legacy_n not in modes:
+            modes.append(legacy_n)
+        z_sums = [np.sum(np.exp(1j * n * angle)) for n in modes]
 
         # Pack all local quantities into one buffer and reduce in a single call.
-        # Layout: [n, energy, z.real, z.imag, mom_x, mom_y, ang_mom]
-        local_buf = np.array([
+        # Layout: 7 scalars + 2 floats per harmonic.
+        scalar_block = np.array([
             float(local_n),
             float(local_energy),
-            float(local_z_sum.real),
-            float(local_z_sum.imag),
             float(local_mom[0]),
             float(local_mom[1]),
             float(local_ang_mom[0]),
             float(local_energy_rot),
+            0.0,                      # padding for alignment / future use
         ], dtype=np.float64)
-        global_buf = np.zeros(8, dtype=np.float64)
+        harm_block = np.empty(2 * len(modes), dtype=np.float64)
+        for k, zs in enumerate(z_sums):
+            harm_block[2 * k]     = float(zs.real)
+            harm_block[2 * k + 1] = float(zs.imag)
+        local_buf = np.concatenate([scalar_block, harm_block])
+        global_buf = np.zeros_like(local_buf)
         self.comm.Allreduce(local_buf, global_buf, op=MPI.SUM)
 
         global_n          = global_buf[0]
         global_energy     = global_buf[1]
-        global_z_sum      = global_buf[2] + 1j * global_buf[3]
-        global_mom        = global_buf[4:6]
-        global_ang_mom    = global_buf[6:7]
-        global_energy_rot = global_buf[7]
+        global_mom        = global_buf[2:4]
+        global_ang_mom    = global_buf[4:5]
+        global_energy_rot = global_buf[5]
+
+        # Decode the harmonic block back to per-n complex sums.
+        global_z_sums = {}
+        for k, n in enumerate(modes):
+            global_z_sums[n] = global_buf[7 + 2 * k] + 1j * global_buf[7 + 2 * k + 1]
 
         mean_u   = global_mom    / global_n
         mean_eta = global_ang_mom / global_n
         temp = (2.0 / (self.dim + 1)) * global_energy / global_n
 
-        m = global_z_sum / global_n
-        R = np.abs(m)
+        R = {n: float(np.abs(z / global_n)) for n, z in global_z_sums.items()}
+        legacy_R = R[legacy_n]
 
-        
         self.history["step"].append(step)
         self.history["temperature"].append(temp)
         self.history["energy"].append(global_energy / global_n)
@@ -335,7 +354,9 @@ class CFMZNeedleDSMCHomo:
         self.history["momentum_1"].append(np.linalg.norm(mean_u[0]))
         self.history["momentum_2"].append(np.linalg.norm(mean_u[1]))
         self.history["ang_momentum"].append(np.linalg.norm(mean_eta))
-        self.history["circular_var"].append(1-R)
+        self.history["circular_var"].append(1 - legacy_R)
+        for n in self.n_modes:
+            self.history[f"circular_var_n{n}"].append(1 - R[n])
 
         self.swarm.restoreField("orientation")
         self.swarm.restoreField("velocity")
@@ -350,7 +371,8 @@ class CFMZNeedleDSMCHomo:
             "N": global_n,
             "mean_u": mean_u,
             "temperature": temp,
-            "circular_var": 1-R
+            "circular_var": 1 - legacy_R,
+            "R": R,
         }
 
     def maxwellian(self, step):
@@ -792,3 +814,6 @@ class CFMZNeedleDSMC:
                 if self.rank == 0:
                     self.plot_history(prefix=f"{self.output_path}/dsmc")
             gc.collect()
+
+
+from .disc import CFMZDiscDSMCHomo  # noqa: E402  (re-export at module scope)
