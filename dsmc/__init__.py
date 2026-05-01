@@ -1,4 +1,4 @@
-from .cfmz import CFMZNeedleDSMC, CFMZNeedleDSMCHomo, CFMZDiscDSMCHomo
+from .cfmz import CFMZNeedleDSMC, CFMZNeedleDSMCHomo, CFMZDiscDSMCHomo, CFMZDiscDSMC
 from .boltzmann import BoltzmannDSMC
 from petsc4py import PETSc
 from mpi4py import MPI

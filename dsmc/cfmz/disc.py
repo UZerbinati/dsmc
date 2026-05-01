@@ -24,16 +24,16 @@ import os
 import numpy as np
 from mpi4py import MPI
 
-from . import CFMZNeedleDSMCHomo
+from . import CFMZNeedleDSMCHomo, CFMZNeedleDSMC
 
 
 def _disc_onsager_factory(L, bins, comm):
     """Build ``(vlasov_force, interaction_energy)`` closures for the
-    disc Onsager pair potential ``W = |sin(2 Δθ)|``.
+    *homogeneous* disc Onsager pair potential ``W = |sin(2 Δθ)|``.
 
     Mirrors the kernel/CIC machinery used in ``tests/cfmz/test_12.py``
-    for the rod Onsager potential.  The closures are pure functions of
-    the local orientation array; MPI reductions happen inside
+    for the rod Onsager potential.  The Vlasov closure has signature
+    ``vlasov_force(theta)``; MPI reductions happen inside
     ``_cic_density`` via the supplied communicator.
 
     Parameters
@@ -74,6 +74,86 @@ def _disc_onsager_factory(L, bins, comm):
 
     def interaction_energy(theta):
         rho = _cic_density(theta)
+        return float(np.sum(W_mat * rho[:, None] * rho[None, :]) * delta_theta**2)
+
+    return vlasov_force, interaction_energy
+
+
+def _disc_onsager_factory_inhomo(L, bins, bins_theta, comm):
+    """Build ``(vlasov_force, interaction_energy)`` for the
+    *inhomogeneous* disc Onsager pair potential.
+
+    The Vlasov closure has signature ``vlasov_force(angle, X, density)``,
+    matching the inhomogeneous transport step's calling convention
+    (see ``transport_inhomo.vlasov_kick_step``).  The supplied
+    ``density`` is per-particle, shape ``(nlocal, bins_theta)``: each
+    row is the normalized orientation histogram of the particle's
+    *owning cell*.  The Vlasov torque on particle p in θ-bin k is
+
+        F_p = L² · (V_eff[p, k] − V_eff[p, k+1]) / Δθ,
+        V_eff[p, :] = (W ∗ ρ_cell_p)(:) · Δθ.
+
+    The ``interaction_energy`` closure uses a global CIC density
+    (allreduced across ranks) and is consistent with the homogeneous
+    version — it tracks ``E[ρ_global]`` as a single-rank scalar
+    diagnostic.  This is sufficient for monitoring the orientational
+    transition; per-cell free energies would require a separate API
+    that delivers position information to the diagnostic.
+
+    Parameters
+    ----------
+    L : float
+        Disc-size prefactor.
+    bins : int
+        Number of θ-grid cells for the CIC global density (used by
+        ``interaction_energy``).
+    bins_theta : int
+        Number of θ-grid cells for the per-cell density supplied to
+        ``vlasov_force``.  Should match ``opts["bins_theta"]`` (see
+        ``CFMZNeedleDSMC._construct_grid``); the default is 32.
+    comm : MPI.Comm
+        Communicator for the global CIC allreduce.
+    """
+    # Per-cell kernel matrix on the bins_theta grid.
+    delta_theta_cell = 2 * np.pi / bins_theta
+    centers_cell = (np.arange(bins_theta) + 0.5) * delta_theta_cell
+    diff_cell = centers_cell[:, None] - centers_cell[None, :]
+    W_mat_cell = np.abs(np.sin(2 * diff_cell))
+
+    # Global CIC kernel matrix on the bins grid.
+    delta_theta = 2 * np.pi / bins
+    centers = (np.arange(bins) + 0.5) * delta_theta
+    diff = centers[:, None] - centers[None, :]
+    W_mat = np.abs(np.sin(2 * diff))
+
+    def _cic_density_global(theta_local):
+        t = theta_local.ravel() / delta_theta
+        k = np.floor(t).astype(int) % bins
+        w2 = t - np.floor(t)
+        w1 = 1.0 - w2
+        rho = np.zeros(bins)
+        np.add.at(rho, k,              w1)
+        np.add.at(rho, (k + 1) % bins, w2)
+        rho = comm.allreduce(rho, op=MPI.SUM)
+        rho /= (rho.sum() * delta_theta)
+        return rho
+
+    def vlasov_force(angle, X, density):
+        # density: (nlocal, bins_theta), per-particle owning-cell histogram
+        # in **probability-mass** form (rows sum to 1; see
+        # transport_inhomo._per_particle_density).  Convert to a density
+        # implicitly: V_eff[k] = Σ_j (mass_j/Δθ) · W[k,j] · Δθ
+        #                     = Σ_j mass_j · W[k,j].
+        V_eff = density @ W_mat_cell
+        theta_arr = np.asarray(angle).ravel()
+        k_idx = (np.floor(theta_arr / delta_theta_cell).astype(int)) % bins_theta
+        k_next = (k_idx + 1) % bins_theta
+        rows = np.arange(theta_arr.size)
+        force = L**2 * (V_eff[rows, k_idx] - V_eff[rows, k_next]) / delta_theta_cell
+        return force.reshape(-1, 1)
+
+    def interaction_energy(theta):
+        rho = _cic_density_global(theta)
         return float(np.sum(W_mat * rho[:, None] * rho[None, :]) * delta_theta**2)
 
     return vlasov_force, interaction_energy
@@ -176,3 +256,82 @@ class CFMZDiscDSMCHomo(CFMZNeedleDSMCHomo):
         # Rebind the collision step to the disc-specific kernel.
         from .collision_disc import nanbu_collision_step_disc
         self.nanbu_collision_step = nanbu_collision_step_disc.__get__(self)
+
+
+class CFMZDiscDSMC(CFMZNeedleDSMC):
+    """DSMC solver for the **inhomogeneous** discotic CFMZ kinetic equation.
+
+    Subclass of :class:`CFMZNeedleDSMC` (positions + orientations) that
+    swaps in the discotic defaults: 4-fold-symmetric Onsager pair
+    potential ``W = |sin(2(θ₁ − θ₂))|``, the tetratic order parameter
+    family ``R_n`` for ``n ∈ {1, 2, 4, 6}``, the disc-specific per-cell
+    collision kernel from :mod:`dsmc.cfmz.collision_disc_inhomo`, and an
+    optional smectic / positional order parameter
+    ``ψ_S(k) = |⟨e^{i k·x}⟩|`` (drives ``history["smectic_abs_{idx}"]``).
+
+    The same constructor calling convention as
+    :class:`CFMZDiscDSMCHomo` applies for ``vlasov_force`` /
+    ``interaction_energy`` (``None`` ⇒ auto-build from ``W_disc``;
+    ``False`` ⇒ explicitly disable).  Set ``opts["smectic_k"]`` to a
+    list of wavevector tuples (length ``spatial_dim``) to detect
+    columnar / layered structure along chosen wavevectors.
+
+    .. note::
+
+       The same ``info["inertia"] = 1.0`` natural-units convention as
+       the other CFMZ classes applies — the Vlasov kick step does not
+       divide by the moment of inertia.
+    """
+
+    def __init__(
+        self,
+        opts: dict,
+        info: dict = None,
+        vlasov_force=None,
+        translational_force=None,
+        interaction_energy=None,
+        comm: MPI.Comm = MPI.COMM_WORLD,
+    ):
+        info = dict(info) if info else {}
+        opts = dict(opts)
+
+        opts.setdefault("n_modes", [1, 2, 4, 6])
+        info.setdefault("cross_section", "hard_disc")
+        info.setdefault("radius", info.get("length", 1.0))
+        info["length"] = info["radius"]
+
+        bins = opts.get("bins", 31)
+        bins_theta = opts.get("bins_theta", 32)
+        if vlasov_force is None or interaction_energy is None:
+            auto_vf, auto_ie = _disc_onsager_factory_inhomo(
+                info["radius"], bins, bins_theta, comm,
+            )
+            if vlasov_force is None:
+                vlasov_force = auto_vf
+            if interaction_energy is None:
+                interaction_energy = auto_ie
+        if vlasov_force is False:
+            vlasov_force = None
+        if interaction_energy is False:
+            interaction_energy = None
+
+        super().__init__(
+            opts=opts,
+            info=info,
+            vlasov_force=vlasov_force,
+            translational_force=translational_force,
+            interaction_energy=interaction_energy,
+            comm=comm,
+        )
+
+        # Override output path to keep disc results separate.
+        self.output_path = (
+            f"{self.prefix}_output_cfmz_disc_inhomo_{self.collision_type}"
+        )
+        if self.rank == 0:
+            os.makedirs(self.output_path, exist_ok=True)
+        self.comm.Barrier()
+
+        # Rebind the collision step to the disc-specific per-cell kernel.
+        from .collision_disc_inhomo import nanbu_collision_step_disc_inhomo
+        self.nanbu_collision_step = nanbu_collision_step_disc_inhomo.__get__(self)

@@ -549,6 +549,15 @@ class CFMZNeedleDSMC:
         self.bins_theta = opts.get("bins_theta", 32)
         self.test = opts.get("test", "sod_rod")
         self.variance = opts.get("variance", "circle")
+        self.n_modes = [int(n) for n in opts.get("n_modes", [2])]
+        # Smectic / positional order parameters ψ_S(k) = |⟨e^{i k·x}⟩|.
+        # ``smectic_k`` is a list of tuples; tuple length must match the
+        # spatial dimension (1 or 2).  ``None`` disables the diagnostic.
+        raw_smectic_k = opts.get("smectic_k", None)
+        self.smectic_k = (
+            [tuple(float(c) for c in k) for k in raw_smectic_k]
+            if raw_smectic_k is not None else None
+        )
         self.prefix = opts.get("prefix", "")
         self.extra_collision = opts.get("extra_collision", 1)
         self.collision_type = opts.get("collision_type", "nanbu")
@@ -594,6 +603,13 @@ class CFMZNeedleDSMC:
             "ang_momentum": [],
             "circular_var": [],
         }
+        for n in self.n_modes:
+            self.history[f"circular_var_n{n}"] = []
+        if self.smectic_k is not None:
+            for idx in range(len(self.smectic_k)):
+                self.history[f"smectic_re_{idx}"] = []
+                self.history[f"smectic_im_{idx}"] = []
+                self.history[f"smectic_abs_{idx}"] = []
         if interaction_energy is not None:
             self.history["interaction_energy"] = []
             self.history["total_energy"] = []
@@ -681,12 +697,35 @@ class CFMZNeedleDSMC:
 
         Same global reduction as ``CFMZNeedleDSMCHomo``, but ``self.nlocal``
         is queried from the swarm in case a migration has changed it.
+
+        Tracks an arbitrary harmonic family ``R_n`` per ``opts["n_modes"]``
+        (legacy ``circular_var`` is preserved) and an optional smectic /
+        positional order parameter family ``ψ_S(k) = |⟨e^{i k·x}⟩|`` per
+        ``opts["smectic_k"]`` — useful for detecting columnar / layered
+        phases of the discotic solver.
         """
+        # Choose the harmonic that drives the legacy ``circular_var``.
+        if self.variance == "circle":
+            legacy_n = 1
+        elif self.variance == "real_projective_plane":
+            legacy_n = 2
+        else:
+            raise RuntimeError(f"[!] Do not know how to compute the variance for {self.variance}")
+
+        modes = list(self.n_modes)
+        if legacy_n not in modes:
+            modes.append(legacy_n)
+        n_smectic = len(self.smectic_k) if self.smectic_k is not None else 0
+
+        # Layout: 7 scalars + 2·|modes| harmonic floats + 2·n_smectic smectic floats.
+        n_scalar = 7
+        buf_size = n_scalar + 2 * len(modes) + 2 * n_smectic
+
         self.nlocal = self.swarm.getLocalSize()
         if self.nlocal == 0:
             # Edge case: rank momentarily owns no particles.  Participate in
             # the allreduce with zeros so collective ops stay synchronised.
-            local_buf = np.zeros(8, dtype=np.float64)
+            local_buf = np.zeros(buf_size, dtype=np.float64)
         else:
             angle = self.swarm.getField("orientation")
             vel = self.swarm.getField("velocity")
@@ -702,38 +741,67 @@ class CFMZNeedleDSMC:
             local_energy = (0.5 * self.info["mass"] * np.sum(vel * vel) +
                             local_energy_rot)
 
-            if self.variance == "circle":
-                z = np.exp(1j * angle)
-            elif self.variance == "real_projective_plane":
-                z = np.exp(2j * np.mod(angle, np.pi))
-            else:
-                raise RuntimeError(f"[!] Do not know how to compute the variance for {self.variance}")
-            local_z_sum = np.sum(z)
+            z_sums = [np.sum(np.exp(1j * n * angle)) for n in modes]
 
-            local_buf = np.array([
+            scalar_block = np.array([
                 float(local_n),
                 float(local_energy),
-                float(local_z_sum.real),
-                float(local_z_sum.imag),
                 float(local_mom[0]),
                 float(local_mom[1]),
                 float(local_ang_mom[0]),
                 float(local_energy_rot),
+                0.0,
             ], dtype=np.float64)
+            harm_block = np.empty(2 * len(modes), dtype=np.float64)
+            for k, zs in enumerate(z_sums):
+                harm_block[2 * k]     = float(zs.real)
+                harm_block[2 * k + 1] = float(zs.imag)
+
+            if n_smectic > 0:
+                # Read positions via the swarm's cell-DM coordinate field.
+                celldm = self.swarm.getCellDMActive()
+                coord_names = celldm.getCoordinateFields()
+                pos = self.swarm.getField(coord_names[0])
+                X = np.asarray(pos).reshape(local_n, self.mesh_dim)
+                smectic_block = np.empty(2 * n_smectic, dtype=np.float64)
+                for idx, k_vec in enumerate(self.smectic_k):
+                    # Each k_vec has length spatial_dim; X has columns for the
+                    # full mesh (spatial + filler).  Take only the first
+                    # spatial_dim columns.
+                    k_arr = np.asarray(k_vec, dtype=np.float64)
+                    phase = X[:, : self.spatial_dim] @ k_arr
+                    s = np.exp(1j * phase).sum()
+                    smectic_block[2 * idx]     = float(s.real)
+                    smectic_block[2 * idx + 1] = float(s.imag)
+                self.swarm.restoreField(coord_names[0])
+            else:
+                smectic_block = np.empty(0, dtype=np.float64)
+
+            local_buf = np.concatenate([scalar_block, harm_block, smectic_block])
 
             self.swarm.restoreField("orientation")
             self.swarm.restoreField("velocity")
             self.swarm.restoreField("angular_velocity")
 
-        global_buf = np.zeros(8, dtype=np.float64)
+        global_buf = np.zeros(buf_size, dtype=np.float64)
         self.comm.Allreduce(local_buf, global_buf, op=MPI.SUM)
 
         global_n = global_buf[0]
         global_energy = global_buf[1]
-        global_z_sum = global_buf[2] + 1j * global_buf[3]
-        global_mom = global_buf[4:6]
-        global_ang_mom = global_buf[6:7]
-        global_energy_rot = global_buf[7]
+        global_mom = global_buf[2:4]
+        global_ang_mom = global_buf[4:5]
+        global_energy_rot = global_buf[5]
+
+        global_z_sums = {}
+        for k, n in enumerate(modes):
+            global_z_sums[n] = global_buf[n_scalar + 2 * k] + 1j * global_buf[n_scalar + 2 * k + 1]
+
+        smectic_offset = n_scalar + 2 * len(modes)
+        global_smectic = []
+        for idx in range(n_smectic):
+            re = float(global_buf[smectic_offset + 2 * idx])
+            im = float(global_buf[smectic_offset + 2 * idx + 1])
+            global_smectic.append(complex(re, im))
 
         if global_n <= 0:
             raise RuntimeError("[!] Lost all particles during migration.")
@@ -742,8 +810,8 @@ class CFMZNeedleDSMC:
         mean_eta = global_ang_mom / global_n
         temp = (2.0 / (self.dim + 1)) * global_energy / global_n
 
-        m = global_z_sum / global_n
-        R = np.abs(m)
+        R = {n: float(np.abs(z / global_n)) for n, z in global_z_sums.items()}
+        legacy_R = R[legacy_n]
 
         self.history["step"].append(step)
         self.history["temperature"].append(temp)
@@ -759,7 +827,15 @@ class CFMZNeedleDSMC:
         self.history["momentum_1"].append(np.linalg.norm(mean_u[0]))
         self.history["momentum_2"].append(np.linalg.norm(mean_u[1]))
         self.history["ang_momentum"].append(np.linalg.norm(mean_eta))
-        self.history["circular_var"].append(1 - R)
+        self.history["circular_var"].append(1 - legacy_R)
+        for n in self.n_modes:
+            self.history[f"circular_var_n{n}"].append(1 - R[n])
+        for idx, s in enumerate(global_smectic):
+            re_n = s.real / global_n
+            im_n = s.imag / global_n
+            self.history[f"smectic_re_{idx}"].append(re_n)
+            self.history[f"smectic_im_{idx}"].append(im_n)
+            self.history[f"smectic_abs_{idx}"].append(float(np.hypot(re_n, im_n)))
 
         if self.rank == 0:
             with open(f'{self.output_path}/history.pickle', 'wb') as fp:
@@ -769,7 +845,13 @@ class CFMZNeedleDSMC:
             "N": global_n,
             "mean_u": mean_u,
             "temperature": temp,
-            "circular_var": 1 - R,
+            "circular_var": 1 - legacy_R,
+            "R": R,
+            "smectic": [
+                {"re": s.real / global_n, "im": s.imag / global_n,
+                 "abs": float(np.hypot(s.real, s.imag) / global_n)}
+                for s in global_smectic
+            ],
         }
 
     def run(self, nsteps: int, monitor_every: int = 10):
@@ -816,4 +898,4 @@ class CFMZNeedleDSMC:
             gc.collect()
 
 
-from .disc import CFMZDiscDSMCHomo  # noqa: E402  (re-export at module scope)
+from .disc import CFMZDiscDSMCHomo, CFMZDiscDSMC  # noqa: E402  (re-export at module scope)

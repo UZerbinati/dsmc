@@ -729,3 +729,44 @@ All under ``tests/cfmz/`` with ``from dsmc import CFMZDiscDSMCHomo``:
 | ``test_disc_3`` | Auto disc Onsager + Andersen, T_bath = 0.5 (α ≫ α_c) | R₄ → > 0.9; R₁, R₂, R₆ < 0.1 |
 | ``test_disc_4`` | T_bath sweep over 0.2–8.0; phase-diagram analog of ``test_27`` | R₄(T_bath) drops near α_c |
 | ``test_disc_5`` | Same as ``test_disc_3``; sanity check on R₁ and R₆ | R₁, R₆ ≪ R₄ throughout |
+
+### 13.8 Inhomogeneous extension (`CFMZDiscDSMC`)
+
+The ``CFMZDiscDSMC`` class is the positional twin of
+``CFMZDiscDSMCHomo``: same orientational kernel and order parameters,
+but built on top of ``CFMZNeedleDSMC`` (positions on the cell DM) so
+that *positional* / *columnar* / *smectic* phenomena become accessible.
+
+The Vlasov force is auto-built from a separate
+``_disc_onsager_factory_inhomo`` because the inhomogeneous transport
+step expects the signature ``F(angle, X, density)``, where ``density``
+is the **per-cell** orientation histogram (one row per particle, in
+probability-mass form: rows sum to 1).  The convolution
+``V_eff = density @ W_disc`` therefore omits the explicit Δθ factor
+that the homogeneous CIC version uses (because the per-cell density
+is mass, not density-of-θ).  Per-cell collisions go through
+``dsmc/cfmz/collision_disc_inhomo.py``, which mirrors the homogeneous
+disc kernel.
+
+**Smectic / positional order parameter.**  The new opt
+``opts["smectic_k"]`` is a list of wavevector tuples (each tuple has
+length ``spatial_dim``).  For each wavevector ``k`` the diagnostic
+records
+
+```
+ψ_S(k) = |⟨exp(i k · x)⟩|
+```
+
+and stores ``smectic_re_{idx}``, ``smectic_im_{idx}``,
+``smectic_abs_{idx}`` in ``history``.  ``plot_history`` overlays all
+``smectic_abs_*`` curves on a single ``_smectic`` figure.
+
+For a uniform spatial IC and no position-orientation coupling in the
+dynamics, ψ_S(k) sits at the finite-N noise floor ``≈ 1/√N``.  Genuine
+columnar / smectic ordering requires either a non-uniform IC, a
+``translational_force`` callable that couples ω/θ to **v** (e.g. the
+``"oriented_disc"`` collision mode), or boundary forcing.
+
+| Test | Setup | Checks |
+|------|-------|--------|
+| ``test_disc_6`` | Inhomogeneous solver (1-D periodic, ``uniform_1d``); auto disc Onsager; Andersen thermostat at T_bath = 0.5; smectic_k at k₀ = 2π/Lx and k₁ = 4π/Lx | R₄ rises into the tetratic plateau; ψ_S(k₀), ψ_S(k₁) both at noise floor 1/√N (uniform-density expectation) |

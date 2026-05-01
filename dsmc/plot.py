@@ -77,6 +77,26 @@ def plot_history(self, prefix=""):
         fig.savefig(f"{prefix}_variance_modes.png", dpi=400)
         plt.close(fig)
 
+    # Smectic / positional order parameters ψ_S(k) per registered wavevector.
+    smectic_re = re.compile(r"^smectic_abs_(\d+)$")
+    smectic_keys = sorted(
+        ((int(m.group(1)), key) for key in self.history.keys() if (m := smectic_re.match(key))),
+        key=lambda t: t[0],
+    )
+    if smectic_keys:
+        fig, ax, _ = fig_axes()
+        for idx, key in smectic_keys:
+            ax.plot(time, np.array(self.history[key]),
+                    linewidth=1.5, label=fr"$\psi_S(k_{{{idx}}})$")
+        ax.set_xlabel(r"$t$")
+        ax.set_ylabel(r"$\psi_S(k) = |\langle e^{i k \cdot x}\rangle|$")
+        ax.set_ylim(-0.05, 1.05)
+        ax.legend()
+        ax.tick_params(which="both", direction="in", top=True, right=True)
+        fig.savefig(f"{prefix}_smectic.pdf")
+        fig.savefig(f"{prefix}_smectic.png", dpi=400)
+        plt.close(fig)
+
 
 # ---------------------------------------------------------------------------
 # CFMZ-specific
