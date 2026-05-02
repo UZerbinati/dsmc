@@ -805,3 +805,52 @@ is conserved by collisions regardless of the orientational kernel.
 `|sin(m Δθ)|` and the head-tail symmetry forces an even-fold
 kernel).  Other integer choices (e.g. n_fold = 6 for a hexagonal
 analogue) are admissible if you have a use for them.
+
+### 13.10 Per-cell VTK export for ParaView
+
+The inhomogeneous solver carries spatial structure that is not directly
+captured by the scalar diagnostics in `history.pickle`.  To inspect
+that structure visually — local nematic order patterns, density
+modulations along the director, smectic stripes — use the
+``export_cell_fields_vtk`` method bound on every ``CFMZNeedleDSMC`` /
+``CFMZDiscDSMC`` instance:
+
+```python
+sim = CFMZNeedleDSMC(...)
+sim.run(...)                                # or call mid-run
+sim.export_cell_fields_vtk(
+    prefix=f"{sim.output_path}/dsmc_{step}",
+    smectic_k=[(2*np.pi/Lx, 0.0)],          # registered wavevectors
+    time=step * sim.dt,                      # animation time stamp
+)
+```
+
+The call is collective (must be invoked on every MPI rank) but only
+rank 0 actually writes the file.  Output is plain ASCII XML
+``.vtr`` (vtkRectilinearGrid); no third-party dependency.
+
+Per-cell field schema:
+
+| Field | Components | Definition |
+|---|---|---|
+| `density` | scalar | particles in cell / cell volume |
+| `mean_velocity` | 3 | `⟨v⟩_cell`, padded `z=0` |
+| `mean_orientation` | 3 | director from local Q-tensor: `(cos θ̄, sin θ̄, 0)` with `θ̄ = ½ atan2(⟨sin 2θ⟩, ⟨cos 2θ⟩)` |
+| `local_R2` | scalar | `√(⟨cos 2θ⟩² + ⟨sin 2θ⟩²)` on the cell |
+| `cell_eta` | scalar | local Parsons-Lee packing fraction `(π/4) ρ L²` |
+| `local_psi_re_<idx>` | scalar | `⟨cos(2θ) cos(k_idx · x)⟩_cell` per registered k |
+| `local_psi_im_<idx>` | scalar | `⟨cos(2θ) sin(k_idx · x)⟩_cell` per registered k |
+
+Empty cells receive zero in every field; this avoids ParaView
+visualising spurious unit-length glyphs in regions with no particles.
+
+ParaView pipeline for a smectic / discotic-nematic snapshot:
+
+1. ``paraview output/<prefix>_*.vtr`` (loads the time series).
+2. *Glyph* filter on cell-centre ``mean_orientation``, scale by
+   ``local_R2``, type "2D Glyph" → "Edge".
+3. Cell-colour the underlying grid by ``density`` to see smectic
+   stripes; colour the glyph filter by ``local_psi_re_0`` to see the
+   smectic phase pattern at the first registered wavevector.
+4. Use the time slider to animate; ``time`` is stored as
+   ``FieldData/TimeValue`` so ParaView orders frames temporally.

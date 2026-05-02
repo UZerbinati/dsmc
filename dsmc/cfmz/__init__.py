@@ -628,6 +628,7 @@ class CFMZNeedleDSMC:
         from .transport_inhomo import transport_step, vlasov_kick_step
         from .collision_inhomo import nanbu_collision_step, andersen_thermostat_step
         from .initial_inhomo import initialize_particles
+        from .vtk_export import export_cell_fields_vtk
 
         self.initialize_particles = initialize_particles.__get__(self)
         self.plot_observables = plot_cfmz_observables.__get__(self)
@@ -636,6 +637,7 @@ class CFMZNeedleDSMC:
         self.vlasov_kick_step = vlasov_kick_step.__get__(self)
         self.nanbu_collision_step = nanbu_collision_step.__get__(self)
         self.andersen_thermostat_step = andersen_thermostat_step.__get__(self)
+        self.export_cell_fields_vtk = export_cell_fields_vtk.__get__(self)
 
         self.initialize_particles()
         init_plot()
