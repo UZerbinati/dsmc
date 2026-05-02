@@ -1006,7 +1006,7 @@ The "i ∈ C only" restriction in step 2 is what avoids the cross-cell
 double-counting that a naive cell-list scheme would suffer; each pair
 is processed exactly once, when the loop visits the cell containing $i$.
 
-### 14.5 Cell-sizing constraint
+### 14.5 Cell-sizing constraint and parameter scaling
 
 Step 2 pulls collision partners only from the cell + neighbours.
 For *all* contact pairs to be reachable the spatial cell width must be
@@ -1017,25 +1017,38 @@ L_x / bins  ≥  L     (and similarly L_y / bins for 2-D).
 ```
 
 The `CFMZNeedleDSMC.__init__` constructor warns when this constraint is
-violated.  For physically interesting Enskog runs at $\eta \sim 0.4$
-the natural choice is
+violated.
 
-| Parameter | Suggested value | Rationale |
+**Physics-aware parameter scaling.**  The two physical scales that
+the simulation must resolve are (i) the Onsager spinodal temperature
+$T_{NI}$, set by the rod length $L$ alone via
+$T_{NI} = (2/(3\pi)) L^2$; and (ii) the Parsons-Lee packing fraction
+$\eta = (\pi/4)\rho L^2$, which controls whether the density
+correction is *active* or *capped*.  We want $T_{NI}$ to land within
+the swept $T_\text{bath}$ range AND $\eta$ to sit in the active range
+$\eta \in [0.1, 0.7]$.
+
+Use $L = \sqrt{12}$ (so $T_{NI} = 8/\pi \approx 2.55$ — the canonical
+calamitic value).  Then $\eta = 0.5$ requires
+$\rho L^2 \approx 0.64$, equivalently
+$N_\text{total} \approx (4/\pi)\,\eta\,(L_x/L)^2$.  Choose
+$L_x = n_\text{layers} \cdot L$ for an integer $n_\text{layers}$ so
+the smectic wavelength fits the box commensurately:
+
+| Parameter | Suggested value (Enskog smectic regime) | Rationale |
 |---|---|---|
-| $L$ | 0.10 | rod length (sets η through ρL²) |
-| $L_x$ | 1.0 | unit box |
-| `bins` | 8 | cell width 0.125 ≥ L ✓ |
-| `nlocal` | $≈ 40\,000$ → ρ = 4 × 10⁴ ⇒ η ≈ 314 | … too high! |
+| $L$ | $\sqrt{12} \approx 3.46$ | $T_{NI} = 8/\pi \approx 2.55$ |
+| `n_layers` | 50 | 50 rod-lengths across the box |
+| $L_x$ | $50\sqrt{12} \approx 173.2$ | $L_x = n_\text{layers} \cdot L$ |
+| `bins` | 8 | cell width $L_x/8 \approx 21.7 \gg L$ ✓ |
+| $\eta$ target | 0.5 | Parsons-Lee active, not capped |
+| $N_\text{total}$ | $\approx (4/\pi)\,0.5\,50^2 \approx 1592$ | derived from $\eta$ |
+| $T_\text{bath}$ schedule | $\{5.0, 3.5, 2.5, 2.0, 1.5, 1.0, 0.5\}$ | crosses $T_{NI}$ |
 
-This last row exposes a subtlety: with $L = 0.10$ and the DSMC
-convention $\nu = \nu(N)$ already including the particle count, the
-"natural" packing fraction in the *physical* sense is much smaller —
-$\eta \sim O(\rho_{\rm phys} L^2)$, with $\rho_{\rm phys}$ being the
-*spatial* number-density per unit area (or length).  In our 2-D box
-$[0, 1]^2$ at `nlocal = 40 000` we have $\rho_{\rm phys} \approx
-4 \times 10^4 / \mathrm{box\,area}$, which gives a physically dense
-limit.  In practice we rescale $L$ rather than $N$ to control $\eta$;
-$L = 0.005$ gives $\eta \approx 0.79$, edge of the smectic regime.
+This is what `test_needle_smectic_2d.py` and
+`test_needle_smectic_2d_sweep.py` use as their defaults; they expose
+`-n_layers`, `-eta`, and `-T_bath` as CLI flags so the user can scan
+the parameter space.
 
 ### 14.6 Multi-rank caveat
 
@@ -1083,8 +1096,24 @@ The "noise floor" is $\sim 1/\sqrt{N_{\rm global}}$; the diagnostic is
 designed to detect ordering above this.  The test
 `test_needle_smectic_2d` and the sweep
 `test_needle_smectic_2d_sweep` both implement this exact
-diagnostic — they register `smectic_k = [(2π/L_x, 0), (0, 2π/L_x)]`
-and report both projections.
+diagnostic — they register a fan of 5 wavevectors around the
+natural smectic mode `m = n_layers` (so `k = m · 2π/L_x` matches
+the rod-length-scale wavelength) along x̂ AND a parallel fan along
+ŷ; the phase-diagram figure plots `max_m ψ_S(m·x̂)` vs
+`max_m ψ_S(m·ŷ)` so the smectic-vs-crystal distinction is visible
+at a glance.
+
+Both tests expose a CLI flag `-vlasov`:
+- `-vlasov 1` *(default)*: enable the calamitic Onsager mean-field
+  (W = |sin Δθ|, identical to test_needle_12.py adapted to the
+  inhomogeneous solver signature).  Provides the temperature-driven
+  I-N transition at the canonical $T_{NI} = 8/\pi$; the Enskog
+  kernel adds the position-orientation coupling that turns the
+  nematic into a smectic.
+- `-vlasov 0`: disable the mean-field; runs *pure Enskog* DSMC.
+  Tests whether the Bates-Frenkel hard-rod smectic-A transfers to
+  the kinetic / DSMC framework without any soft-potential help —
+  this is research follow-up; an empirical question.
 
 ### 14.9 Tests for the Enskog needle suite
 
