@@ -1061,3 +1061,34 @@ uniformly.  In the dilute regime the position-correlation contribution
 to the cross-section integrates out and the moments of the relaxation
 match Boltzmann within statistical noise.  This is checked numerically
 in `tests/cfmz/test_needle_sod_dense.py` — see §14.9.
+
+### 14.8 Smectic-vs-crystal distinguishing diagnostic
+
+A smectic-A phase has 1-D positional order along the director and
+remains liquid in the perpendicular plane.  A 2-D crystal has
+positional order in *both* directions.  The CFMZ smectic
+diagnostic registers a list of wavevectors via `opts["smectic_k"]`,
+each contributing a `smectic_abs_<idx>` history key.  Registering
+a wavevector along $\hat{n}$ AND another along $\hat{n}^\perp$
+gives the operational signature:
+
+| Phase | $\psi_S(\mathbf{k}\parallel \hat{n})$ | $\psi_S(\mathbf{k}\perp \hat{n})$ |
+|---|---|---|
+| Isotropic | ≈ 0 (noise) | ≈ 0 (noise) |
+| Nematic | ≈ 0 (noise) | ≈ 0 (noise) |
+| **Smectic-A** | **> noise** | ≈ 0 (noise) |
+| 2-D crystal | > noise | > noise |
+
+The "noise floor" is $\sim 1/\sqrt{N_{\rm global}}$; the diagnostic is
+designed to detect ordering above this.  The test
+`test_needle_smectic_2d` and the sweep
+`test_needle_smectic_2d_sweep` both implement this exact
+diagnostic — they register `smectic_k = [(2π/L_x, 0), (0, 2π/L_x)]`
+and report both projections.
+
+### 14.9 Tests for the Enskog needle suite
+
+| Test | Setup | What it checks |
+|------|-------|----------------|
+| `test_needle_smectic_2d` | 2-D periodic, NVT at $T_\text{bath} = 0.30$, η ~ 0.6, VTK every 50 steps | smectic-A emergence in the 2-D box; $\psi_S(\hat{x})$ rises above noise, $\psi_S(\hat{y})$ stays at noise |
+| `test_needle_smectic_2d_sweep` | T_bath sweep at 7 values from 1.5 down to 0.15 | three-phase diagram (I → N → Sm-A); per-T VTK snapshot for ParaView |

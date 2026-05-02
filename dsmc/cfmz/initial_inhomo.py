@@ -3,13 +3,35 @@ import numpy as np
 
 
 def initialize_particles(self):
-    """Dispatch on ``self.test``; populate position, velocity, θ, ω."""
+    """Dispatch on ``self.test``; populate position, velocity, θ, ω.
+
+    Recognised values of ``self.test``:
+
+    - ``"sod_rod"``: 1-D Sod-tube Riemann (left dense + uniform-θ;
+      right dilute + von-Mises-θ).  The orientational means on each
+      side are configurable through ``info["left_mean_angle"]`` and
+      ``info["right_mean_angle"]``; defaults are uniform-left and
+      π/2-right (von-Mises concentrated on the y-axis).
+    - ``"uniform_1d"`` / ``"uniform_2d"``: spatially-uniform density,
+      θ uniformly random on (0, 2π).
+    - ``"uniform_perturbed_1d"`` / ``"uniform_perturbed_2d"``:
+      spatially-uniform density, θ drawn from
+      ``1 + A cos(k θ + φ)`` (using the homogeneous solver's
+      perturbation sampler).  ``info["initial_angle_amplitude"]``,
+      ``initial_angle_shift``, and ``initial_angle_wavelength`` set
+      A, φ, and k.  Director is implicitly seeded along the angle
+      ``-φ/k`` — for k = 2 and φ = 0 that is the x-axis.
+    """
     if self.test == "sod_rod":
         _initialize_sod_rod(self)
     elif self.test == "uniform_1d":
         _initialize_uniform(self, dim=1)
     elif self.test == "uniform_2d":
         _initialize_uniform(self, dim=2)
+    elif self.test == "uniform_perturbed_1d":
+        _initialize_uniform(self, dim=1, perturb_angle=True)
+    elif self.test == "uniform_perturbed_2d":
+        _initialize_uniform(self, dim=2, perturb_angle=True)
     else:
         raise RuntimeError(f"[!] Unknown test: {self.test}")
 
@@ -126,8 +148,18 @@ def _initialize_sod_rod(self):
     self.swarm.restoreField("weight")
 
 
-def _initialize_uniform(self, dim):
-    """Uniform IC: spatial density uniform on the full domain, θ ~ Uniform(0, 2π)."""
+def _initialize_uniform(self, dim, perturb_angle=False):
+    """Uniform spatial IC.
+
+    By default the orientations are drawn uniformly on (0, 2π).  When
+    ``perturb_angle`` is True they are drawn from
+    ``1 + A cos(k θ + φ)`` using the homogeneous solver's
+    ``_sample_perturbed_positions_1d`` helper — exactly the same
+    angle distribution used by the homogeneous
+    ``perturbed_uniform_angle`` IC, here simply spliced onto
+    spatially-uniform positions.  This is the IC used by the smectic
+    needle tests, which need a director seeded at a known direction.
+    """
     if dim == 1:
         Lx = self.info["Lx"]
         xs, xe = self.dm.getRanges()[0]
@@ -173,8 +205,14 @@ def _initialize_uniform(self, dim):
         else:
             vel[:] = self.rng.uniform(-0.5, 0.5, (n, self.dim))
             omega[:] = self.rng.uniform(-0.25, 0.25, (n, 1))
-        ang = self.rng.uniform(0.0, 2 * np.pi, (n, 1))
-        ang = np.clip(ang, 1e-12, 2 * np.pi - 1e-12)
+        if perturb_angle:
+            # Reuse the homogeneous helper for the cos-perturbed angle PDF.
+            from .initial import _sample_perturbed_positions_1d
+            ang_flat = _sample_perturbed_positions_1d(self, n)
+            ang = np.clip(ang_flat[:, None], 1e-12, 2 * np.pi - 1e-12)
+        else:
+            ang = self.rng.uniform(0.0, 2 * np.pi, (n, 1))
+            ang = np.clip(ang, 1e-12, 2 * np.pi - 1e-12)
         angle[:] = ang
         wgt[:] = 1.0
 
