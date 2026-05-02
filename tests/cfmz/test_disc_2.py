@@ -1,11 +1,11 @@
 """
 Discotic test 2 — isotropic regime under Andersen thermostat
-============================================================
+=============================================================
 
-Auto disc Onsager + Andersen thermostat at T_bath = 8.0 (so the
-Onsager coupling α = R²/T_bath ≈ 1.5 is well below the spinodal
-α_c = 3π/2 ≈ 4.71).  The thermostat heats the system above the
-discotic critical temperature; orientations should remain isotropic.
+3-D-disc-in-2-D model (n_fold=2 default, kernel ``|sin(Δθ)|``) with
+Andersen thermostat at T_bath = 8.0.  At this temperature the
+dimensionless Onsager coupling α = R²/T_bath ≈ 1.5 is well below the
+spinodal α_c = 3π/2 ≈ 4.71, so orientations should remain isotropic.
 
 Pass criteria
 -------------
@@ -41,7 +41,7 @@ info = {
     "cross_section": "hard_disc",
     "initial_angle_amplitude": 1e-1,
     "initial_angle_shift": -0.3,
-    "initial_angle_wavelength": 4,
+    "initial_angle_wavelength": 2,    # cos(2θ) seed — same as test_disc_1
 }
 opts = {
     "nlocal": nlocal,

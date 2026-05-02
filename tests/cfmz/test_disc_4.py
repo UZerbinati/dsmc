@@ -2,20 +2,24 @@
 Discotic test 4 — phase-diagram sweep R_n vs T_bath
 ====================================================
 
-Sweep T_bath across the discotic isotropic-tetratic transition for the
-2-D mean-field disc-Onsager system with R = √12.  For each T_bath a
-fresh ``CFMZDiscDSMCHomo`` simulation is run with an Andersen
-thermostat; tail-averaged R₁, R₂, R₄, R₆ are recorded.
+Sweep T_bath across the discotic isotropic-to-nematic (I → N_D)
+transition for the 3-D-disc-in-2-D model (n_fold=2 default,
+kernel ``|sin(Δθ)|``) with R = √12.  For each T_bath a fresh
+``CFMZDiscDSMCHomo`` simulation is run with an Andersen thermostat;
+tail-averaged R₁, R₂, R₄, R₆ are recorded.
 
-Estimated spinodal: T_c = R²·2/(3π) = 8/π ≈ 2.55 (the same numerical
-value as the calamitic case, but the unstable mode is cos(4θ) rather
-than cos(2θ); see CFMZ.md §13.2).
+Spinodal: T_c = R²·2/(3π) = 8/π ≈ 2.55 (numerically the same as the
+calamitic case, since both use the same Fourier-leading-mode kernel —
+but here the mode that goes critical is cos(2θ) acting on the
+projected disc normal, characterising the discotic nematic phase
+N_D, not the calamitic nematic).
 
 Output
 ------
-- ``output/test_disc_4/T_<T>_output_cfmz_disc_nanbu/`` per-T directories
+- ``output/test_disc_4/T_<T>_output_cfmz_disc_nanbu/`` per-T directories.
 - ``output/test_disc_4/phase_diagram.{pdf,png}`` overlaying the four
-  R_n curves vs T_bath.
+  R_n curves vs T_bath.  Expectation: R₂ rises sharply across T_c,
+  R₁/R₄/R₆ stay near zero.
 """
 import sys
 import os
@@ -48,7 +52,7 @@ info = {
     "cross_section": "hard_disc",
     "initial_angle_amplitude": 1e-1,
     "initial_angle_shift": -0.3,
-    "initial_angle_wavelength": 4,
+    "initial_angle_wavelength": 2,    # cos(2θ) seed for R₂ (the critical mode)
 }
 
 T_bath_values = [0.2, 0.4, 0.6, 0.8, 1.0, 1.5, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5,

@@ -3,30 +3,30 @@ Discotic test 6 — inhomogeneous solver, smectic diagnostic
 ===========================================================
 
 End-to-end integration test for ``CFMZDiscDSMC`` (inhomogeneous discotic
-solver).  Runs a 1-D periodic spatial domain at low T_bath (deeply
-tetratic regime) with a uniform initial density, and tracks both the
-orientational order family ``R_n`` and the smectic / positional order
-parameter ``ψ_S(k) = |⟨e^{i k x}⟩|`` at the fundamental and first
-harmonic wavevectors of the spatial box.
+solver, 3-D-disc-in-2-D model with n_fold=2 default).  Runs a 1-D
+periodic spatial domain at low T_bath (deeply nematic regime) with a
+uniform initial density, and tracks both the orientational order family
+``R_n`` and the smectic / positional order parameter
+``ψ_S(k) = |⟨e^{i k x}⟩|`` at the fundamental and first harmonic
+wavevectors of the spatial box.
 
 What the test verifies
 ----------------------
 1.  ``CFMZDiscDSMC`` instantiates and runs without errors using the
     inhomogeneous infrastructure (per-cell Nanbu, position migration,
     cell-DM coordinate access).
-2.  The discotic Vlasov force still drives the I-T transition with
-    positions present: ``R₄`` reaches the expected tetratic plateau.
-3.  The new smectic diagnostic is computed correctly.  With a uniform
+2.  The discotic Vlasov force still drives the I → N_D transition with
+    positions present: ``R₂`` reaches the expected nematic plateau.
+3.  The smectic diagnostic is computed correctly.  With a uniform
     spatial IC and no position-orientation coupling in the dynamics,
-    the columnar order parameters ``ψ_S(k)`` should stay at their
-    finite-N noise floor ``≈ 1/√N`` throughout the run (since the
-    density remains spatially uniform).  This is the cleanest possible
-    unit test for the diagnostic.
+    ``ψ_S(k)`` stays at the finite-N noise floor ``≈ 1/√N`` throughout —
+    the cleanest unit test for the diagnostic.
 
-For a true positional/columnar phase, additional position-orientation
-coupling — e.g. a ``translational_force`` callable, a non-uniform IC,
-or boundary forcing — would be needed.  That is left as research
-follow-up; the infrastructure built here makes it straightforward.
+A true smectic phase requires position-orientation coupling that the
+discotic kernel does NOT provide on its own (the Onsager mean field
+depends only on θ).  For the calamitic side that mechanism is the
+Enskog correction (CFMZ.md §14); for discs it would similarly require
+an extension of the kernel to a position-dependent form.
 """
 import sys
 import petsc4py
@@ -85,7 +85,7 @@ opts = {
 }
 
 Print("Running discotic test 6 — inhomogeneous solver + smectic diagnostic:")
-Print(f"  nlocal={nlocal}, T_bath={T_bath} (deeply tetratic, α≈{R*R/T_bath:.2f})")
+Print(f"  nlocal={nlocal}, T_bath={T_bath} (deeply nematic, α≈{R*R/T_bath:.2f})")
 Print(f"  smectic_k = [(2π/Lx,), (4π/Lx,)]  with  Lx={Lx}")
 
 sim = CFMZDiscDSMC(opts=opts, info=info, comm=MPI.COMM_WORLD)
@@ -104,8 +104,8 @@ if MPI.COMM_WORLD.Get_rank() == 0:
     Print(f"\nFinal-third averages:")
     Print(f"  R₁={final[1]:.3f}  R₂={final[2]:.3f}  R₄={final[4]:.3f}  R₆={final[6]:.3f}")
     Print(f"  ψ_S(k₀)={psi[0]:.4f}  ψ_S(k₁)={psi[1]:.4f}  noise floor 1/√N≈{noise_floor:.4f}")
-    if final[4] < 0.5:
-        Print("  WARNING: tetratic order R₄ did not develop as expected.")
+    if final[2] < 0.5:
+        Print("  WARNING: nematic order R₂ did not develop as expected.")
     if psi[0] > 5 * noise_floor:
         Print("  WARNING: smectic order at k₀ above expected noise floor.")
 Print("test_disc_6 complete.")

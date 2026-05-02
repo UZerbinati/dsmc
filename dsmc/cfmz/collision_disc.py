@@ -106,8 +106,14 @@ def nanbu_collision_step_disc(self):
         ci = ri[:, 0] * n[:, 1] - ri[:, 1] * n[:, 0]
         cj = rj[:, 0] * n[:, 1] - rj[:, 1] * n[:, 0]
 
+        # Cross-section follows the kernel symmetry:
+        # m = n_fold // 2  → S(Δθ) = R · |sin(m Δθ)|.
+        # n_fold = 2 (default, head-tail) → m = 1, the calamitic
+        # |sin(Δθ)| form physically correct for 3-D discotic LCs.
+        # n_fold = 4 (tetratic / 2-D-square) → m = 2.
+        m_kern = getattr(self, "n_fold", 2) // 2
         gn = np.abs(np.sum(V * n, axis=1))
-        S  = R * np.abs(np.sin(2.0 * (thetai - thetaj)))
+        S  = R * np.abs(np.sin(m_kern * (thetai - thetaj)))
         w  = gn * S
         if w.size > 0:
             w_max = float(w.max())

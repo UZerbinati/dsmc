@@ -1,16 +1,17 @@
 """
-Discotic test 3 — tetratic regime under Andersen thermostat
-============================================================
+Discotic test 3 — discotic-nematic regime under Andersen thermostat
+====================================================================
 
-Auto disc Onsager + Andersen thermostat at T_bath = 0.5 (so
-α = R²/T_bath ≈ 24 ≫ α_c).  The system should settle into a strongly
-tetratic phase: R₄ → high steady-state value while R₁, R₂, R₆ stay
-near zero.
+3-D-disc-in-2-D model (n_fold=2 default, kernel ``|sin(Δθ)|``) with
+Andersen thermostat at T_bath = 0.5, well below the spinodal
+α_c = 3π/2 ≈ 4.71 (here α = R²/T_bath ≈ 24).  The system should settle
+into the discotic nematic phase N_D — disc normals strongly aligned
+with a common director — so R₂ → high while R₁, R₄, R₆ stay near zero.
 
 Pass criteria
 -------------
-- R₄ exceeds 0.85 in the final 10 % of the run.
-- R₁, R₂, R₆ all stay below 0.15.
+- R₂ exceeds 0.85 in the final 10 % of the run.
+- R₁, R₄, R₆ all stay below 0.15.
 - Temperature T → T_bath within 5 %.
 """
 import sys
@@ -42,7 +43,7 @@ info = {
     "cross_section": "hard_disc",
     "initial_angle_amplitude": 1e-1,
     "initial_angle_shift": -0.3,
-    "initial_angle_wavelength": 4,
+    "initial_angle_wavelength": 2,    # cos(2θ) seed — drives R₂
 }
 opts = {
     "nlocal": nlocal,
@@ -60,7 +61,7 @@ opts = {
     "prefix": "output/test_disc_3",
 }
 
-Print("Running discotic test 3 — NVT tetratic regime:")
+Print("Running discotic test 3 — NVT discotic-nematic (N_D) regime:")
 Print(f"  T_bath={T_bath} (α = R²/T_bath = {R*R/T_bath:.2f}), α_c≈{3*np.pi/2:.2f}")
 Print(f"  nlocal={nlocal}, nu={nu}, nu_bath={nu_bath}, dt={dt}, nsteps={nsteps}")
 

@@ -1,23 +1,27 @@
 """
-Discotic test 1 — NVE tetratic emergence
-=========================================
+Discotic test 1 — NVE discotic-nematic emergence (3-D-disc-in-2-D)
+==================================================================
 
-Mean-field disc Onsager (W = |sin(2 Δθ)|) auto-built by
-``CFMZDiscDSMCHomo``.  Hard-disc collisions, no Andersen thermostat
-(microcanonical / NVE run).  Initial orientation density is perturbed
-with a 4-fold cosine seed,
+Models a 3-D discotic LC simulated in 2-D with the calamitic-form
+Onsager kernel ``W = |sin(Δθ)|`` (``opts["n_fold"] = 2`` default), where
+θ is the projected disc normal.  Hard-disc collisions, no thermostat
+(microcanonical / NVE).  Initial orientation density is perturbed with a
+**2-fold** cosine seed,
 
-    ρ(θ, t=0) ∝ 1 + A cos(4 θ + φ),    A = 0.1.
+    ρ(θ, t=0) ∝ 1 + A cos(2 θ + φ),    A = 0.1.
 
-so the unstable cos(4θ) mode of the discotic spinodal grows from a
-finite seed instead of from numerical noise.
+so the unstable cos(2θ) mode of the I-N spinodal grows from a finite
+seed.  This recovers the classical Onsager I-N transition with the
+nematic order parameter R₂ as the critical mode — but here R₂
+characterises alignment of *disc normals* (= discotic nematic N_D),
+not of rod long axes.
 
 Pass criteria
 -------------
-- R₄(t) grows from ≈ A/2 ≈ 0.05 to a steady plateau in ≈ 0.6–0.8.
-- R₂ stays near zero throughout (the discotic kernel cannot drive a
-  nematic mode).
-- Total energy E_kin/N + ½ L² E[ρ] is conserved within 1e-3.
+- R₂(t) grows from ≈ A/2 ≈ 0.05 to a steady plateau in ≈ 0.6–0.9.
+- R₁, R₄, R₆ stay near zero throughout (only the head-tail-symmetric
+  R₂ is driven by the |sin(Δθ)| kernel).
+- Total energy E_kin/N + ½ L² E[ρ] is conserved within 1 %.
 """
 import sys
 import petsc4py
@@ -46,7 +50,7 @@ info = {
     "cross_section": "hard_disc",
     "initial_angle_amplitude": 1e-1,
     "initial_angle_shift": -0.3,
-    "initial_angle_wavelength": 4,    # 4-fold seed for the tetratic mode
+    "initial_angle_wavelength": 2,    # cos(2θ) seed for the nematic mode
 }
 opts = {
     "nlocal": nlocal,
@@ -62,7 +66,7 @@ opts = {
     "prefix": "output/test_disc_1",
 }
 
-Print("Running discotic test 1 — NVE tetratic emergence:")
+Print("Running discotic test 1 — NVE discotic-nematic emergence (N_D):")
 Print(f"  nlocal={nlocal}, nu={nu}, dt={dt}, nsteps={nsteps}, seed={seed}")
 Print(f"  R={R:.3f},  α_c·R⁻²·T_c = 8/π ≈ {8/np.pi:.3f}  (spinodal estimate)")
 

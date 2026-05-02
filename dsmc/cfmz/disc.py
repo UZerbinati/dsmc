@@ -27,14 +27,22 @@ from mpi4py import MPI
 from . import CFMZNeedleDSMCHomo, CFMZNeedleDSMC
 
 
-def _disc_onsager_factory(L, bins, comm):
+def _disc_onsager_factory(L, bins, comm, n_fold=2):
     """Build ``(vlasov_force, interaction_energy)`` closures for the
-    *homogeneous* disc Onsager pair potential ``W = |sin(2 Δθ)|``.
+    *homogeneous* disc Onsager pair potential
+    ``W = |sin(m Δθ)|`` with ``m = n_fold / 2``.
 
-    Mirrors the kernel/CIC machinery used in ``tests/cfmz/test_12.py``
-    for the rod Onsager potential.  The Vlasov closure has signature
-    ``vlasov_force(theta)``; MPI reductions happen inside
-    ``_cic_density`` via the supplied communicator.
+    The default ``n_fold = 2`` corresponds to the calamitic-form
+    Onsager kernel ``|sin(Δθ)|`` — the physically correct kernel
+    for a 3-D discotic LC simulated in a 2-D domain, where θ is
+    the projected disc normal (head-tail symmetric, so ``θ ≡ θ + π``).
+    The unstable mode is ``cos(2θ)`` and the I-N transition produces
+    the discotic nematic (N_D) phase with R₂ as the critical order
+    parameter.
+
+    Setting ``n_fold = 4`` recovers the 4-fold-symmetric kernel
+    ``|sin(2 Δθ)|`` of the previous "2-D coin / square" interpretation,
+    which gives a tetratic (R₄-driven) transition.
 
     Parameters
     ----------
@@ -47,11 +55,18 @@ def _disc_onsager_factory(L, bins, comm):
         the convolution against W.
     comm : MPI.Comm
         Communicator over which the density is allreduced.
+    n_fold : int, optional
+        Orientational symmetry of the kernel.  Must be even.
+        Default 2 (head-tail; physically correct for both rods and
+        discs in the projected-axis picture).  4 → tetratic.
     """
+    if n_fold % 2 != 0 or n_fold < 2:
+        raise ValueError(f"n_fold must be an even integer ≥ 2 (got {n_fold})")
+    m = n_fold // 2
     delta_theta = 2 * np.pi / bins
     centers = (np.arange(bins) + 0.5) * delta_theta
     diff = centers[:, None] - centers[None, :]
-    W_mat = np.abs(np.sin(2 * diff))
+    W_mat = np.abs(np.sin(m * diff))
 
     def _cic_density(theta_local):
         t = theta_local.ravel() / delta_theta
@@ -79,26 +94,30 @@ def _disc_onsager_factory(L, bins, comm):
     return vlasov_force, interaction_energy
 
 
-def _disc_onsager_factory_inhomo(L, bins, bins_theta, comm):
+def _disc_onsager_factory_inhomo(L, bins, bins_theta, comm, n_fold=2):
     """Build ``(vlasov_force, interaction_energy)`` for the
-    *inhomogeneous* disc Onsager pair potential.
+    *inhomogeneous* disc Onsager pair potential
+    ``W = |sin(m Δθ)|`` with ``m = n_fold / 2``.
+
+    Default ``n_fold = 2`` is the physically correct kernel for a
+    3-D discotic LC simulated in a 2-D domain (θ = projected disc
+    normal, head-tail symmetric).
 
     The Vlasov closure has signature ``vlasov_force(angle, X, density)``,
     matching the inhomogeneous transport step's calling convention
     (see ``transport_inhomo.vlasov_kick_step``).  The supplied
     ``density`` is per-particle, shape ``(nlocal, bins_theta)``: each
-    row is the normalized orientation histogram of the particle's
-    *owning cell*.  The Vlasov torque on particle p in θ-bin k is
+    row is the *probability-mass* orientation histogram of the
+    particle's owning cell (rows sum to 1).  The Vlasov torque on
+    particle p in θ-bin k is
 
         F_p = L² · (V_eff[p, k] − V_eff[p, k+1]) / Δθ,
-        V_eff[p, :] = (W ∗ ρ_cell_p)(:) · Δθ.
+        V_eff[p, :] = density_p · W       (no extra Δθ; mass form).
 
     The ``interaction_energy`` closure uses a global CIC density
     (allreduced across ranks) and is consistent with the homogeneous
     version — it tracks ``E[ρ_global]`` as a single-rank scalar
-    diagnostic.  This is sufficient for monitoring the orientational
-    transition; per-cell free energies would require a separate API
-    that delivers position information to the diagnostic.
+    diagnostic.
 
     Parameters
     ----------
@@ -113,18 +132,24 @@ def _disc_onsager_factory_inhomo(L, bins, bins_theta, comm):
         ``CFMZNeedleDSMC._construct_grid``); the default is 32.
     comm : MPI.Comm
         Communicator for the global CIC allreduce.
+    n_fold : int, optional
+        Orientational symmetry; default 2.  See ``_disc_onsager_factory``.
     """
+    if n_fold % 2 != 0 or n_fold < 2:
+        raise ValueError(f"n_fold must be an even integer ≥ 2 (got {n_fold})")
+    m = n_fold // 2
+
     # Per-cell kernel matrix on the bins_theta grid.
     delta_theta_cell = 2 * np.pi / bins_theta
     centers_cell = (np.arange(bins_theta) + 0.5) * delta_theta_cell
     diff_cell = centers_cell[:, None] - centers_cell[None, :]
-    W_mat_cell = np.abs(np.sin(2 * diff_cell))
+    W_mat_cell = np.abs(np.sin(m * diff_cell))
 
     # Global CIC kernel matrix on the bins grid.
     delta_theta = 2 * np.pi / bins
     centers = (np.arange(bins) + 0.5) * delta_theta
     diff = centers[:, None] - centers[None, :]
-    W_mat = np.abs(np.sin(2 * diff))
+    W_mat = np.abs(np.sin(m * diff))
 
     def _cic_density_global(theta_local):
         t = theta_local.ravel() / delta_theta
@@ -215,6 +240,12 @@ class CFMZDiscDSMCHomo(CFMZNeedleDSMCHomo):
         opts = dict(opts)
 
         # Discotic defaults — overridable by the caller.
+        # n_fold = 2 → calamitic-form kernel |sin(Δθ)|, the physically
+        # correct choice for a 3-D discotic LC simulated in 2-D where θ
+        # is the projected disc normal (head-tail symmetric).  Critical
+        # mode is R_2 (discotic nematic, N_D).  n_fold = 4 recovers the
+        # 4-fold tetratic interpretation (2-D-square-like particles).
+        opts.setdefault("n_fold", 2)
         opts.setdefault("n_modes", [1, 2, 4, 6])
         info.setdefault("cross_section", "hard_disc")
         info.setdefault("radius", info.get("length", 1.0))
@@ -224,12 +255,16 @@ class CFMZDiscDSMCHomo(CFMZNeedleDSMCHomo):
 
         # Auto-build disc Onsager Vlasov force / interaction energy.
         # Calling convention:
-        #   None      → auto-build the disc Onsager closure
+        #   None      → auto-build the disc Onsager closure with kernel
+        #               W = |sin(m Δθ)|, m = n_fold//2
         #   False     → explicitly disable (parent's "no force" semantics)
         #   callable  → use the caller's closure
         bins = opts.get("bins", 31)
+        n_fold = int(opts["n_fold"])
         if vlasov_force is None or interaction_energy is None:
-            auto_vf, auto_ie = _disc_onsager_factory(info["radius"], bins, comm)
+            auto_vf, auto_ie = _disc_onsager_factory(
+                info["radius"], bins, comm, n_fold=n_fold,
+            )
             if vlasov_force is None:
                 vlasov_force = auto_vf
             if interaction_energy is None:
@@ -246,6 +281,10 @@ class CFMZDiscDSMCHomo(CFMZNeedleDSMCHomo):
             interaction_energy=interaction_energy,
             comm=comm,
         )
+
+        # Stash n_fold so the collision module can read it (the
+        # ``oriented_disc`` cross-section follows the same symmetry).
+        self.n_fold = n_fold
 
         # Output directory — keep disc results separate from needle ones.
         self.output_path = f"{self.prefix}_output_cfmz_disc_{self.collision_type}"
@@ -295,6 +334,8 @@ class CFMZDiscDSMC(CFMZNeedleDSMC):
         info = dict(info) if info else {}
         opts = dict(opts)
 
+        # Discotic defaults; see CFMZDiscDSMCHomo for the n_fold rationale.
+        opts.setdefault("n_fold", 2)
         opts.setdefault("n_modes", [1, 2, 4, 6])
         info.setdefault("cross_section", "hard_disc")
         info.setdefault("radius", info.get("length", 1.0))
@@ -302,9 +343,10 @@ class CFMZDiscDSMC(CFMZNeedleDSMC):
 
         bins = opts.get("bins", 31)
         bins_theta = opts.get("bins_theta", 32)
+        n_fold = int(opts["n_fold"])
         if vlasov_force is None or interaction_energy is None:
             auto_vf, auto_ie = _disc_onsager_factory_inhomo(
-                info["radius"], bins, bins_theta, comm,
+                info["radius"], bins, bins_theta, comm, n_fold=n_fold,
             )
             if vlasov_force is None:
                 vlasov_force = auto_vf
@@ -323,6 +365,8 @@ class CFMZDiscDSMC(CFMZNeedleDSMC):
             interaction_energy=interaction_energy,
             comm=comm,
         )
+
+        self.n_fold = n_fold
 
         # Override output path to keep disc results separate.
         self.output_path = (

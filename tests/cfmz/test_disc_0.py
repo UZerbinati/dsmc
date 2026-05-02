@@ -1,13 +1,21 @@
 """
-Discotic test 0 — pure-collision relaxation
-============================================
+Discotic test 0 — pure-collision relaxation (3-D-disc-in-2-D)
+=============================================================
 
-Hard 2-D disc collisions with NO mean-field Vlasov force and NO Andersen
-thermostat.  Standard parameters: nlocal=2.5e5, bins=256, dt=0.05, nsteps=500.
+Models a 3-D discotic LC simulated in a 2-D domain: each particle's
+orientation θ is the in-plane projection of the disc normal, so
+θ ≡ θ + π (head-tail symmetric).  The Onsager kernel ``|sin(Δθ)|``
+(``opts["n_fold"] = 2``, the new default) drives the discotic-nematic
+phase N_D when the mean field is active.
+
+This test runs hard 2-D disc collisions with **no** Vlasov force and
+**no** Andersen thermostat — so the orientations stay uniform and the
+test focuses on the *collision invariants*.  Standard parameters:
+nlocal=2.5e5, bins=256, dt=0.05, nsteps=500.
 
 Pass criteria
 -------------
-- Total kinetic energy is conserved within 1e-3 (elastic collisions, ev=1).
+- Total kinetic energy conserved within 1e-3 (elastic collisions, ev=1).
 - Hard-disc collisions do **not** transfer torque, so the angular-velocity
   distribution shape is unchanged.  Numerically: ⟨ω²⟩ stays constant
   within 1 % of its t=0 value, and the rotational energy is a
@@ -15,9 +23,10 @@ Pass criteria
 - All R_n stay below ≈ 3 σ statistical noise from the uniform-angle
   baseline (R_n_uniform = 0).
 
-This is the cleanest verification that the new collision kernel
-correctly reproduces the "no torque transfer" property derived for
-hard discs (see CFMZ.md §13.3).
+The "no torque transfer" property follows from the contact-arm geometry
+``r_i = -R n``, ``r_j = +R n`` ⇒ ``c_k = r_k × n = 0``; see CFMZ.md §13.3.
+The collision rule does NOT depend on the orientational kernel choice
+(n_fold), only on disc geometry.
 """
 import sys
 import petsc4py

@@ -769,4 +769,39 @@ columnar / smectic ordering requires either a non-uniform IC, a
 
 | Test | Setup | Checks |
 |------|-------|--------|
-| ``test_disc_6`` | Inhomogeneous solver (1-D periodic, ``uniform_1d``); auto disc Onsager; Andersen thermostat at T_bath = 0.5; smectic_k at k₀ = 2π/Lx and k₁ = 4π/Lx | R₄ rises into the tetratic plateau; ψ_S(k₀), ψ_S(k₁) both at noise floor 1/√N (uniform-density expectation) |
+| ``test_disc_6`` | Inhomogeneous solver (1-D periodic, ``uniform_1d``); auto disc Onsager; Andersen thermostat at T_bath = 0.5; smectic_k at k₀ = 2π/Lx and k₁ = 4π/Lx | R₂ rises into the discotic-nematic plateau; ψ_S(k₀), ψ_S(k₁) both at noise floor 1/√N (uniform-density expectation) |
+
+### 13.9 Switch of default kernel: from tetratic to discotic-nematic
+
+Earlier versions of `CFMZDiscDSMCHomo` / `CFMZDiscDSMC` shipped with a
+4-fold-symmetric kernel `W = |sin(2 Δθ)|` as the default — modelling
+2-D coin-like particles with a labelled internal axis (effectively
+2-D *squares*).  That choice produced a tetratic phase (R₄-driven).
+The *physically correct* setting for a 3-D **discotic LC simulated in
+a 2-D domain** uses the calamitic-form kernel `W = |sin(Δθ)|`, with
+θ the in-plane projection of the disc normal (head-tail symmetric,
+θ ≡ θ + π).  The Onsager second virial for thin platelets in 3-D has
+exactly the same `|sin γ|` angular form as for thin rods (Eppenga &
+Frenkel 1984; Veerman & Frenkel 1992); only the geometric prefactor
+differs.  The unstable mode is `cos(2θ)` and the I-N transition
+produces the **discotic nematic phase $N_D$** with R₂ critical.
+
+Both kernels are now selectable via a new opt:
+
+```python
+opts["n_fold"] = 2   # default — 3-D-disc-in-2-D, R₂ critical (N_D phase)
+opts["n_fold"] = 4   # tetratic / 2-D-square, R₄ critical
+```
+
+The only kernel-dependent part of the orientational machinery is the
+Onsager potential (`_disc_onsager_factory`) and the `oriented_disc`
+NTC cross-section (which uses `|sin(m Δθ)|` with `m = n_fold/2`).
+**The hard-disc collision rule itself does not change with `n_fold`** —
+the contact arms `r_i = -R n`, `r_j = +R n` are derived purely from
+disc geometry, lever arms `c_k = r_k × n` vanish identically, and ω
+is conserved by collisions regardless of the orientational kernel.
+
+`n_fold` must be an even integer ≥ 2 (the kernel is built from
+`|sin(m Δθ)|` and the head-tail symmetry forces an even-fold
+kernel).  Other integer choices (e.g. n_fold = 6 for a hexagonal
+analogue) are admissible if you have a use for them.

@@ -83,8 +83,11 @@ def _nanbu_pair_kernel_disc(self, idxs, vel, theta, omega):
         ci = ri[:, 0] * n[:, 1] - ri[:, 1] * n[:, 0]
         cj = rj[:, 0] * n[:, 1] - rj[:, 1] * n[:, 0]
 
+        # Cross-section follows the kernel symmetry:
+        # m = n_fold // 2  → S(Δθ) = R · |sin(m Δθ)|.
+        m_kern = getattr(self, "n_fold", 2) // 2
         gn = np.abs(np.sum(V * n, axis=1))
-        S  = R * np.abs(np.sin(2.0 * (thetai - thetaj)))
+        S  = R * np.abs(np.sin(m_kern * (thetai - thetaj)))
         w  = gn * S
         if w.size > 0:
             w_max = float(w.max())
