@@ -80,7 +80,7 @@ comm = MPI.COMM_WORLD
 _delta_theta = 2*np.pi / bins
 _centers = (np.arange(bins) + 0.5) * _delta_theta
 
-output_dir = f"output/test_26_output_cfmz_{collision_type}"
+output_dir = f"output/test_needle_26_output_cfmz_{collision_type}"
 
 def _cic_density(theta_local):
     t = theta_local.ravel() / _delta_theta
@@ -132,7 +132,7 @@ opts = {
     "variance": "real_projective_plane",
     "T_bath": T_bath,
     "nu_bath": nu_bath,
-    "prefix": "output/test_26",
+    "prefix": "output/test_needle_26",
 }
 sim = CFMZNeedleDSMC(
     opts=opts,

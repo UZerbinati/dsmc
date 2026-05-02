@@ -74,7 +74,7 @@ opts = {
     "collision_type": collision_type,
     "seed": seed,
     "test": "perturbed_uniform_angle",
-    "prefix": "output/test_5",
+    "prefix": "output/test_needle_5",
 }
 sim = CFMZNeedleDSMC(
     opts=opts,

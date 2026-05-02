@@ -93,8 +93,8 @@ def vlasov_force(theta):
         ax.set_xlabel(r"$t$")
         ax.set_ylabel(r"$|\mathcal{V}(\theta)|$")
         ax.tick_params(which="both", direction="in", top=True, right=True)
-        fig.savefig(f"output/test_21_output_cfmz_{collision_type}/vlasov_energy.pdf")
-        fig.savefig(f"output/test_21_output_cfmz_{collision_type}/vlasov_energy.png", dpi=400)
+        fig.savefig(f"output/test_needle_21_output_cfmz_{collision_type}/vlasov_energy.pdf")
+        fig.savefig(f"output/test_needle_21_output_cfmz_{collision_type}/vlasov_energy.png", dpi=400)
         plt.close(fig)
     return force.reshape(-1, 1)
 
@@ -119,7 +119,7 @@ opts = {
     "seed": seed,
     "test": "uniform_angle",
     "variance": "real_projective_plane",
-    "prefix": "output/test_21",
+    "prefix": "output/test_needle_21",
 }
 sim = CFMZNeedleDSMC(
     opts=opts,

@@ -95,7 +95,7 @@ def interaction_energy_fn(theta):
 
 # Temperature sweep: dense around T_c ≈ 2.55, coarser away from it.
 T_bath_values = [0.2, 0.4, 0.6, 0.8, 1.0, 1.5, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0]
-output_root = "output/test_27"
+output_root = "output/test_needle_27"
 if comm.Get_rank() == 0:
     os.makedirs(output_root, exist_ok=True)
 comm.Barrier()

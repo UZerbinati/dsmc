@@ -63,7 +63,7 @@ opts = {
     "test": "sod_rod",
     "spatial_dim": 1,
     "transport": True,
-    "prefix": "output/test_inhomo_0",
+    "prefix": "output/test_needle_inhomo_0",
 }
 sim = CFMZNeedleDSMC(
     opts=opts,

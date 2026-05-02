@@ -62,7 +62,7 @@ opts = {
     "seed": seed,
     "test": "uniform_angle",
     "transport": False,
-    "prefix": "output/test_0",
+    "prefix": "output/test_needle_0",
 }
 sim = CFMZNeedleDSMC(
     opts=opts,

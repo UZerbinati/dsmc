@@ -13,7 +13,7 @@ Usage
 -----
     python plot_phase_diagram_27.py [output_root] [collision_type]
 
-Defaults: output_root = "output/test_27",  collision_type = "nanbu".
+Defaults: output_root = "output/test_needle_27",  collision_type = "nanbu".
 """
 
 import sys
@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 # ------------------------------------------------------------------ #
 # Configuration                                                        #
 # ------------------------------------------------------------------ #
-output_root    = sys.argv[1] if len(sys.argv) > 1 else "output/test_27"
+output_root    = sys.argv[1] if len(sys.argv) > 1 else "output/test_needle_27"
 collision_type = sys.argv[2] if len(sys.argv) > 2 else "nanbu"
 
 from test_27 import T_bath_values
