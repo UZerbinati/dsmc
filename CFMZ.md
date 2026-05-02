@@ -1092,3 +1092,35 @@ and report both projections.
 |------|-------|----------------|
 | `test_needle_smectic_2d` | 2-D periodic, NVT at $T_\text{bath} = 0.30$, η ~ 0.6, VTK every 50 steps | smectic-A emergence in the 2-D box; $\psi_S(\hat{x})$ rises above noise, $\psi_S(\hat{y})$ stays at noise |
 | `test_needle_smectic_2d_sweep` | T_bath sweep at 7 values from 1.5 down to 0.15 | three-phase diagram (I → N → Sm-A); per-T VTK snapshot for ParaView |
+| `test_needle_sod_dense` | 1-D Sod tube at η_left ≈ 0.4, η_right ≈ 0.05; runs Boltzmann *and* Enskog | dilute-limit regression on the right; Enskog ≠ Boltzmann shock structure on the left (Frezzotti 1998 effect) |
+| `test_needle_sod_orient` | 1-D, uniform ρ and T, vonMises(0, 4) ↔ vonMises(π/2, 4) θ-Riemann; Enskog | rod-specific: orientation-discontinuity diffusion via rod-rod collisions; ρ(x) and T(x) stay flat |
+
+### 14.10 Sod-tube tests
+
+Two 1-D Sod-tube tests exercise the inhomogeneous solver under
+spatial gradients.  Note that 1-D simulation cannot represent a
+true smectic phase (§14.8 explains why), so the role of these
+tests is *validation* of the spatial transport + collision
+machinery rather than smectic-phase identification.
+
+`test_needle_sod_dense` is the standard high-density Sod tube run
+twice — once with `collision_kind = "boltzmann"`, once with
+`"enskog"` — and writes a side-by-side density profile.  In the
+dilute right-half the kernels match within statistical noise
+(dilute-limit regression).  In the dense left-half the Enskog
+shock front is steeper / faster than the Boltzmann one because the
+Parsons-Lee correction enhances the local collision rate; this
+matches the Frezzotti 1998 prediction for hard-sphere gases,
+extended here to thin rods.
+
+`test_needle_sod_orient` is a *rod-specific* Riemann problem
+without a calamitic-fluid analogue: density and temperature are
+uniform on both sides of the box, but the orientation
+distributions are sharply different — vonMises(0, 4) on the left,
+vonMises(π/2, 4) on the right.  The orientational diffusion of
+the discontinuity is driven entirely by rod-rod collisions
+(through the `|sin Δθ|` cross-section).  The diagnostic plot
+shows ⟨cos 2θ⟩(x) at three time slices, transitioning from a
+sharp ±1 step at $t=0$ to a smooth profile by the final time.
+ρ(x) and T(x) stay flat throughout — the orientation Riemann
+does not couple to a density shock at the leading order.

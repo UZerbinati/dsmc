@@ -56,8 +56,31 @@ def _smooth_twice(g, sigma):
 def _initialize_sod_rod(self):
     """Sod-like 1-D rod shock tube.
 
-    Left  (x < Lx/2): ρ_L = 1,     T_L = 1.0, θ uniform on [0, 2π).
-    Right (x > Lx/2): ρ_R = 0.125, T_R = 0.8, θ ~ vonMises(π/2, κ).
+    Left  (x < Lx/2): density ρ_L, temperature T_L, orientation
+                     distribution selected by ``info["left_mean_angle"]``.
+                     If unset, θ is uniform on [0, 2π) (the legacy
+                     behaviour matched against test_needle_inhomo_0).
+                     If set, θ is drawn from von Mises with mean
+                     ``left_mean_angle`` and concentration
+                     ``info["left_concentration"]`` (default 2.0).
+    Right (x > Lx/2): density ρ_R, temperature T_R, orientation
+                     drawn from von Mises with mean
+                     ``info["right_mean_angle"]`` (default π/2) and
+                     concentration ``info["right_concentration"]``
+                     (default 2.0).
+
+    Configuration keys (all read from ``self.info``):
+
+    - ``rho_left``, ``rho_right``: 1.0 / 0.125 (Sod-shock canonical).
+    - ``T_left``, ``T_right``:     1.0 / 0.8.
+    - ``left_mean_angle`` (None or float): None ⇒ uniform-θ on left
+      (legacy).  Float ⇒ von-Mises mean on the left side.
+    - ``left_concentration`` (float): von-Mises κ on the left;
+      ignored if ``left_mean_angle`` is None.
+    - ``right_mean_angle`` (float): von-Mises mean on the right
+      (default π/2).  Set to a different value to construct an
+      orientation Riemann.
+    - ``right_concentration`` (float): von-Mises κ on the right.
     """
     Lx = self.info["Lx"]
     rho_L = self.info.get("rho_left", 1.0)
@@ -65,6 +88,9 @@ def _initialize_sod_rod(self):
     T_L = self.info.get("T_left", 1.0)
     T_R = self.info.get("T_right", 0.8)
     kappa = self.info.get("right_concentration", 2.0)
+    right_mean = self.info.get("right_mean_angle", 0.5 * np.pi)
+    left_mean = self.info.get("left_mean_angle", None)
+    left_kappa = self.info.get("left_concentration", 2.0)
     self.info["norm_rho"] = 0.5 * (rho_L + rho_R)
 
     xs, xe = self.dm.getRanges()[0]
@@ -129,12 +155,27 @@ def _initialize_sod_rod(self):
         vel[:] = gauss_v
         omega[:] = gauss_w
 
-        # Orientations: uniform on left, von Mises at π/2 on right.
+        # Orientations: left side is uniform if ``left_mean_angle`` is
+        # None (legacy), else von-Mises at the chosen mean.  Right side
+        # is always von-Mises at ``right_mean_angle`` (default π/2).
         angle_arr = np.empty((n, 1))
         if is_left.any():
-            angle_arr[is_left, 0] = self.rng.uniform(0.0, 2 * np.pi, int(is_left.sum()))
+            n_left_local = int(is_left.sum())
+            if left_mean is None:
+                angle_arr[is_left, 0] = self.rng.uniform(
+                    0.0, 2 * np.pi, n_left_local
+                )
+            else:
+                samples_l = (
+                    self.rng.vonmises(0.0, left_kappa, n_left_local)
+                    + float(left_mean)
+                )
+                angle_arr[is_left, 0] = np.mod(samples_l, 2 * np.pi)
         if is_right.any():
-            samples = self.rng.vonmises(0.0, kappa, int(is_right.sum())) + 0.5 * np.pi
+            samples = (
+                self.rng.vonmises(0.0, kappa, int(is_right.sum()))
+                + float(right_mean)
+            )
             angle_arr[is_right, 0] = np.mod(samples, 2 * np.pi)
         # Avoid hitting the (0, 2π) boundary that diagnostics() guards against.
         angle_arr = np.clip(angle_arr, 1e-12, 2 * np.pi - 1e-12)
