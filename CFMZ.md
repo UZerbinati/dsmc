@@ -854,3 +854,210 @@ ParaView pipeline for a smectic / discotic-nematic snapshot:
    smectic phase pattern at the first registered wavevector.
 4. Use the time slider to animate; ``time`` is stored as
    ``FieldData/TimeValue`` so ParaView orders frames temporally.
+
+---
+
+## 14. The Enskog correction (`collision_kind = "enskog"`)
+
+The Onsager mean-field machinery in §7 captures the orientational
+isotropic-nematic transition for hard rods very cleanly, but it cannot
+on its own produce *positional* phases (smectic-A, columnar) that
+dense rod systems develop above some packing fraction.  The reason is
+in the Boltzmann collision integral itself: that integral assumes
+collisions are local in space *and* uses an uncorrelated pair
+distribution at contact.  Both assumptions break in dense fluids; the
+**Enskog** correction restores them.
+
+### 14.1 Why Boltzmann misses the smectic phase
+
+Boltzmann's collision integral
+
+```
+Q_B[f, f](x, ξ) = ∫∫ |g_rel · n̂| · σ(ξ_1, ξ_2)
+                    [f(x, ξ_1') f(x, ξ_2')  −  f(x, ξ_1) f(x, ξ_2)] dn̂ dξ_2
+```
+
+assumes:
+1. **Locality**: both particles in a pair share the same point ``x``.
+   The contact vector $\boldsymbol{\sigma}_{ij}$ between centres is
+   collapsed to zero, throwing away the spatial structure that the
+   contact distance would otherwise carry.
+2. **Stoßzahlansatz**: ``f^{(2)}(x, x; ξ_1, ξ_2) = f(x, ξ_1) f(x, ξ_2)``.
+   Equivalent to ``g(σ⁺) ≡ 1`` — particles are uncorrelated at
+   contact.
+
+Both approximations are exact in the dilute limit (low packing
+fraction) but break down progressively at higher density, where
+finite-size effects bias both the collision rate (more frequent in
+dense regions) and the spatial structure of the post-collisional
+state.  Without these effects there is no mechanism for a uniform
+density to spontaneously break translational symmetry into smectic
+layers — and indeed Boltzmann DSMC of hard rods at any density never
+produces a smectic phase.
+
+The classical microscopic numerical reference for the smectic-A in
+dense hard rods is Bates & Frenkel (*J. Chem. Phys.* 109:6193, 1998)
+in 2-D and Bolhuis & Frenkel (*Phys. Rev. E* 56:5495, 1997) in 3-D —
+both via molecular dynamics, which inherently captures Enskog physics.
+
+### 14.2 The Enskog kinetic equation
+
+The Enskog generalisation is
+
+```
+Q_E[f, f](x, ξ) = ∫∫ |g_rel · n̂| · σ(ξ_1, ξ_2) · g(σ⁺; ρ_local) ·
+                    [f(x − σ̂, ξ_1') f(x + σ̂, ξ_2')
+                                              − f(x, ξ_1) f(x − σ_full, ξ_2)] …
+```
+
+Two formal differences from Boltzmann:
+
+1. The **arguments of f at the colliding points are offset** by the
+   contact vector $\boldsymbol{\sigma}$.  In particle DSMC this means
+   the post-collisional state at $\mathbf{x}_i$ depends on the
+   pre-collisional state at $\mathbf{x}_j = \mathbf{x}_i + \boldsymbol{\sigma}_{ij}$.
+2. The **contact value of the radial distribution function**
+   $g(\sigma^+; \rho_{\rm local})$ multiplies the collision rate.  At
+   high density it grows above 1 (Carnahan-Starling-like) and amplifies
+   the collision rate per particle — the principal microscopic effect
+   of crowding.
+
+Both ingredients introduce position-orientation correlations and
+density-dependent collision frequency that Boltzmann washes out.
+Together they produce, *spontaneously*, the smectic-A phase.
+
+### 14.3 Carnahan-Starling and Parsons-Lee
+
+The classical 3-D hard-sphere result (Carnahan-Starling 1969) is
+
+```
+Z_CS(φ) = (1 + φ + φ² − φ³) / (1 − φ)³,
+g_CS(σ⁺) = (1 − φ/2) / (1 − φ)³,
+```
+
+with $\varphi = (\pi/6) \rho \sigma^3$ the volume packing fraction.
+For 2-D hard discs Henderson (1975) gives
+
+```
+g_2D(σ⁺) = (1 − 7φ/16) / (1 − φ)²,    φ = π R² ρ.
+```
+
+For **2-D hard rods** Parsons (1979) and Lee (1987/1988) showed that
+a Carnahan-Starling-like factor can be rolled into Onsager's
+second-virial theory without altering its angular structure; the
+effective rod packing fraction is
+
+```
+η = (π/4) ρ L²
+```
+
+(2-D rod-area scaling, with $L$ the rod length used in the Onsager
+cross-section), and the correction factor takes the simple form
+
+```
+g_PL(η) = (1 − η/4) / (1 − η)².
+```
+
+This is the multiplicative weight we apply to the NTC acceptance
+probability:
+
+```
+w_Enskog = |V · n̂_ij| · L|sin Δθ| · g_PL(η_local).
+```
+
+Cross-checks:
+- Dilute limit $\eta \to 0$: $g_{\rm PL} \to 1$, recovering Boltzmann
+  DSMC.
+- Onset of nematic-smectic regime $\eta \approx 0.4$:
+  $g_{\rm PL} \approx 1.7$, a 70 % collision-rate enhancement.
+- Crystallisation regime $\eta \to 1$: $g_{\rm PL}$ diverges; we
+  cap at $\eta_{\rm cap} = 0.85$ to avoid blow-up.
+
+### 14.4 The Enskog DSMC algorithm
+
+Implemented in `dsmc/cfmz/collision_enskog_inhomo.py` as
+`nanbu_collision_step_enskog_inhomo`.  Algorithm (per timestep):
+
+1. Compute global cell IDs for all local particles
+   from positions: `i_p + j_p · nx`.  Build the cell list with
+   `dsmc.utils.build_cell_lists`.
+2. For each cell C:
+   - Build the candidate pool $P_C = C \cup \mathrm{neighbours}(C)$
+     (8 neighbours in 2-D; 2 in 1-D; periodic wrap on `bcs="periodic"`).
+   - Sample $M_{\rm cand} = \lfloor \tfrac{1}{2} \nu_{\max} |C|\, \Delta t\rfloor$
+     candidate pairs $(i, j)$ with $i \in C$ (avoids double-counting
+     cross-cell pairs) and $j \in P_C \setminus \{i\}$.
+   - For each pair: compute relative position $\mathbf{r}_{ij}$ (with
+     periodic-image unwrap), reject pairs at $\|\mathbf{r}_{ij}\| > L$
+     (outside the contact shell), and set
+     $\hat{\mathbf{n}}_{ij} = \mathbf{r}_{ij} / \|\mathbf{r}_{ij}\|$.
+   - Apply the standard rod contact-arm sampling
+     $\mathbf{r}_i = \ell_i \boldsymbol{\nu}_i$ (uniform $\ell \in [0, L]$),
+     $\mathbf{r}_j = L \boldsymbol{\nu}_j$ (tip on rod $j$).
+   - Compute the NTC acceptance weight
+     $w = |\mathbf{V}\cdot\hat{\mathbf{n}}_{ij}|\,L|\sin\Delta\theta|\,g_{\rm PL}(\eta_C)$
+     and accept with probability $w/\nu_{\max}$.
+   - For accepted pairs, apply the rigid-rod impulse using
+     $\hat{\mathbf{n}}_{ij}$ as the contact normal — same impulse
+     formula as Boltzmann (`collision_inhomo._nanbu_pair_kernel`
+     lines 64-99).
+
+The "i ∈ C only" restriction in step 2 is what avoids the cross-cell
+double-counting that a naive cell-list scheme would suffer; each pair
+is processed exactly once, when the loop visits the cell containing $i$.
+
+### 14.5 Cell-sizing constraint
+
+Step 2 pulls collision partners only from the cell + neighbours.
+For *all* contact pairs to be reachable the spatial cell width must be
+at least the rod length:
+
+```
+L_x / bins  ≥  L     (and similarly L_y / bins for 2-D).
+```
+
+The `CFMZNeedleDSMC.__init__` constructor warns when this constraint is
+violated.  For physically interesting Enskog runs at $\eta \sim 0.4$
+the natural choice is
+
+| Parameter | Suggested value | Rationale |
+|---|---|---|
+| $L$ | 0.10 | rod length (sets η through ρL²) |
+| $L_x$ | 1.0 | unit box |
+| `bins` | 8 | cell width 0.125 ≥ L ✓ |
+| `nlocal` | $≈ 40\,000$ → ρ = 4 × 10⁴ ⇒ η ≈ 314 | … too high! |
+
+This last row exposes a subtlety: with $L = 0.10$ and the DSMC
+convention $\nu = \nu(N)$ already including the particle count, the
+"natural" packing fraction in the *physical* sense is much smaller —
+$\eta \sim O(\rho_{\rm phys} L^2)$, with $\rho_{\rm phys}$ being the
+*spatial* number-density per unit area (or length).  In our 2-D box
+$[0, 1]^2$ at `nlocal = 40 000` we have $\rho_{\rm phys} \approx
+4 \times 10^4 / \mathrm{box\,area}$, which gives a physically dense
+limit.  In practice we rescale $L$ rather than $N$ to control $\eta$;
+$L = 0.005$ gives $\eta \approx 0.79$, edge of the smectic regime.
+
+### 14.6 Multi-rank caveat
+
+Cross-rank ghost-particle migration is not implemented.  When
+`size > 4` the constructor warns: collision partners on cell
+boundaries that lie on a different MPI rank are silently dropped
+from the candidate pool, biasing the statistics on those boundaries.
+For research-grade runs we recommend single-rank or up-to-4-rank
+operation; multi-rank Enskog with proper ghost migration is a
+follow-up project.
+
+The Boltzmann path
+(`collision_kind = "boltzmann"`, the default) is unaffected by this
+limitation since pair selection there is local to a single cell and
+needs no neighbour information.
+
+### 14.7 Dilute-limit regression check
+
+The Enskog kernel reduces to Boltzmann DSMC in the limit
+$\eta \to 0$ ($g_{\rm PL} \to 1$), with one residual difference: the
+contact normal is still derived from positions rather than sampled
+uniformly.  In the dilute regime the position-correlation contribution
+to the cross-section integrates out and the moments of the relaxation
+match Boltzmann within statistical noise.  This is checked numerically
+in `tests/cfmz/test_needle_sod_dense.py` — see §14.9.

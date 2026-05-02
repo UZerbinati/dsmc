@@ -635,9 +635,51 @@ class CFMZNeedleDSMC:
         self.plot_history = plot_history.__get__(self)
         self.transport_step = transport_step.__get__(self)
         self.vlasov_kick_step = vlasov_kick_step.__get__(self)
-        self.nanbu_collision_step = nanbu_collision_step.__get__(self)
         self.andersen_thermostat_step = andersen_thermostat_step.__get__(self)
         self.export_cell_fields_vtk = export_cell_fields_vtk.__get__(self)
+
+        # Collision-operator dispatch.
+        # ``info["collision_kind"]`` selects the rod collision kernel:
+        #   "boltzmann" (default): cell-local Nanbu, uniform-random
+        #     contact normal, no density correction.  Standard DSMC.
+        #   "enskog":     cross-cell pair selection, position-derived
+        #     contact normal, Parsons-Lee g_PL(η) on the acceptance
+        #     weight.  See dsmc.cfmz.collision_enskog_inhomo and
+        #     CFMZ.md §14.  Recommended for dense rod systems where
+        #     positional correlations matter.
+        collision_kind = self.info.get("collision_kind", "boltzmann")
+        if collision_kind == "boltzmann":
+            self.nanbu_collision_step = nanbu_collision_step.__get__(self)
+        elif collision_kind == "enskog":
+            from .collision_enskog_inhomo import nanbu_collision_step_enskog_inhomo
+            self.nanbu_collision_step = nanbu_collision_step_enskog_inhomo.__get__(self)
+            # Cell-sizing constraint for Enskog: cell width must be ≳ L
+            # so collision partners always live in the cell + neighbours.
+            L = self.info.get("length", 1.0)
+            if self.spatial_dim == 1:
+                cell_w = self.info["Lx"] / self.bins
+            else:
+                cell_w = min(
+                    (self.info["xmax"] - self.info["xmin"]) / self.bins,
+                    (self.info["ymax"] - self.info["ymin"]) / self.bins,
+                )
+            if cell_w < L:
+                if self.rank == 0:
+                    print(
+                        f"[!] Enskog cell width {cell_w:.3g} < rod length {L:.3g}; "
+                        "some collision partners may be missed.  See CFMZ.md §14.4."
+                    )
+            if self.size > 4 and self.rank == 0:
+                print(
+                    "[!] Enskog kernel does not currently exchange ghost particles "
+                    "across MPI ranks; pair statistics on cell boundaries will be "
+                    "lossy with > 4 ranks.  Recommend single-rank or few-rank runs."
+                )
+        else:
+            raise ValueError(
+                f"info['collision_kind'] = {collision_kind!r}; expected "
+                "'boltzmann' or 'enskog'."
+            )
 
         self.initialize_particles()
         init_plot()
