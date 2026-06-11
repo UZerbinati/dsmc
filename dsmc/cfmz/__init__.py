@@ -624,19 +624,29 @@ class CFMZNeedleDSMC:
         self.mesh_dim = self.dm.getDimension()
         self.swarm = self._create_swarm()
 
-        from dsmc.plot import init_plot, plot_cfmz_observables, plot_history
+        from dsmc.plot import init_plot, plot_history
         from .transport_inhomo import transport_step, vlasov_kick_step
         from .collision_inhomo import nanbu_collision_step, andersen_thermostat_step
         from .initial_inhomo import initialize_particles
-        from .vtk_export import export_cell_fields_vtk
+        from .vtk_export import export_cell_fields_vtk, write_pvd_collection
 
         self.initialize_particles = initialize_particles.__get__(self)
-        self.plot_observables = plot_cfmz_observables.__get__(self)
         self.plot_history = plot_history.__get__(self)
         self.transport_step = transport_step.__get__(self)
         self.vlasov_kick_step = vlasov_kick_step.__get__(self)
         self.andersen_thermostat_step = andersen_thermostat_step.__get__(self)
         self.export_cell_fields_vtk = export_cell_fields_vtk.__get__(self)
+        self.write_pvd_collection = write_pvd_collection.__get__(self)
+
+        # Per-simulator-particle weight F_N = N_phys / N_sim, used to
+        # decouple the *physical* density consumed by Enskog (and by VTK
+        # output) from the simulator-particle count.  Default 1.0 = each
+        # simulator particle represents one physical particle, i.e. the
+        # original behaviour.  Values <1 oversample (drives down shot
+        # noise at fixed η); >1 undersample.  Only the Enskog kernel and
+        # the VTK density / cell_eta fields read this; intensive averages
+        # (R₂, ψ_S, T) are F_N-invariant.  See CFMZ.md §14.10.
+        self.particle_weight = float(self.info.get("particle_weight", 1.0))
 
         # Collision-operator dispatch.
         # ``info["collision_kind"]`` selects the rod collision kernel:
@@ -670,15 +680,44 @@ class CFMZNeedleDSMC:
                         "some collision partners may be missed.  See CFMZ.md §14.4."
                     )
             if self.size > 4 and self.rank == 0:
+                # Heuristic: PETSc DMDA partitions a 2-D mesh into roughly
+                # √size × √size subrectangles, so each rank owns ~bins/√size
+                # cells per side.  Cells whose 3×3 neighbourhood crosses a
+                # rank boundary lose ~3/9 of their candidate pool; the
+                # fraction of such cells is ≲ 4√size / bins.  Net pair-loss
+                # estimate: (4√size / bins) × (3/9) ≈ (4/3)·√size/bins.
+                bins_per_dim = max(self.bins, 1)
+                boundary_frac = min(4.0 * np.sqrt(float(self.size))
+                                    / float(bins_per_dim), 1.0)
+                pair_loss_pct = 100.0 * boundary_frac / 3.0
                 print(
-                    "[!] Enskog kernel does not currently exchange ghost particles "
-                    "across MPI ranks; pair statistics on cell boundaries will be "
-                    "lossy with > 4 ranks.  Recommend single-rank or few-rank runs."
+                    f"[!] Enskog kernel running on {self.size} MPI ranks "
+                    f"(recommended ≤4): with bins={self.bins} the cross-rank "
+                    f"halo is not exchanged, so an estimated ~{pair_loss_pct:.0f}% "
+                    f"of candidate pairs at rank seams are silently dropped. "
+                    "Simulation is still parallel-correct (transport, Boltzmann, "
+                    "thermostat, diagnostics); only Enskog smectic statistics "
+                    "are biased low near rank boundaries.  See CFMZ.md §14.4."
                 )
         else:
             raise ValueError(
                 f"info['collision_kind'] = {collision_kind!r}; expected "
                 "'boltzmann' or 'enskog'."
+            )
+
+        # 2-D + multi-rank warning: the DMSwarm migrate path in 2-D
+        # silently drops ~50 % of particles per step on >1 ranks
+        # regardless of BC type or collision kernel.  1-D inhomogeneous
+        # runs are unaffected.  Until the underlying mesh/swarm
+        # migration is fixed, recommend mpirun -n 1 for 2-D smectic
+        # runs.  See CFMZ.md §14.5 / plan Phase 7.
+        if self.spatial_dim == 2 and self.size > 1 and self.rank == 0:
+            print(
+                f"[!] CFMZNeedleDSMC: 2-D inhomogeneous runs on >1 MPI "
+                f"rank currently lose particles in DMSwarm migrate "
+                f"(~50 %/step).  This is a pre-existing 2-D mesh/swarm "
+                f"interaction issue, not specific to Enskog.  Run with "
+                f"`mpirun -n 1` for physics-correct results."
             )
 
         self.initialize_particles()
@@ -898,8 +937,15 @@ class CFMZNeedleDSMC:
             ],
         }
 
-    def run(self, nsteps: int, monitor_every: int = 10):
-        """Advance the simulation for ``nsteps`` time steps with Strang splitting."""
+    def run(self, nsteps: int, monitor_every: int = 10,
+            callback=None, callback_every: int = None):
+        """Advance the simulation for ``nsteps`` time steps with Strang splitting.
+
+        ``callback``, if given, is invoked as ``callback(step)`` every
+        ``callback_every`` steps and at the final step — useful for
+        periodic side-effects (e.g. VTK snapshots) without breaking the
+        run into multiple ``sim.run`` calls.
+        """
         d = self.diagnostics()
         if self.rank == 0:
             print(
@@ -909,7 +955,6 @@ class CFMZNeedleDSMC:
                 f"circ_var={np.linalg.norm(d['circular_var']):.6e} "
             )
         self._construct_grid()
-        self.plot_observables(prefix=f"{self.output_path}/dsmc_0")
 
         for step in range(1, nsteps + 1):
             if self.transport:
@@ -936,9 +981,11 @@ class CFMZNeedleDSMC:
                     f"circ_var={np.linalg.norm(d['circular_var']):.6e} "
                 )
             if step % monitor_every == 0 or step == nsteps:
-                self.plot_observables(prefix=f"{self.output_path}/dsmc_{step}")
                 if self.rank == 0:
                     self.plot_history(prefix=f"{self.output_path}/dsmc")
+            if callback is not None and callback_every is not None and (
+                    step % callback_every == 0 or step == nsteps):
+                callback(step)
             gc.collect()
 
 

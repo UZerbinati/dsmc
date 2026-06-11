@@ -430,6 +430,8 @@ E_kin/N → (3/2) T_bath while E_int evolves to its canonical average.
 | `initial_angle_amplitude` | float | — | Perturbation amplitude A for `perturbed_uniform_angle` IC |
 | `initial_angle_shift` | float | — | Phase shift for the perturbation |
 | `initial_angle_wavelength` | int | — | Wavenumber k of the perturbation |
+| `collision_kind` | str | `"boltzmann"` | Inhomogeneous-solver collision kernel: `"boltzmann"` or `"enskog"` (Parsons-Lee). See §14. |
+| `particle_weight` | float | `1.0` | F_N = N_phys/N_sim, decoupling sample count from physical density. Read by Enskog kernel and VTK density/cell_eta. See §14.11. |
 
 ---
 
@@ -1153,3 +1155,366 @@ shows ⟨cos 2θ⟩(x) at three time slices, transitioning from a
 sharp ±1 step at $t=0$ to a smooth profile by the final time.
 ρ(x) and T(x) stay flat throughout — the orientation Riemann
 does not couple to a density shock at the leading order.
+
+### 14.11 Decoupled $N_{\rm sim}$ scaling via the particle weight
+
+DSMC particles are samples of the kinetic distribution, not real
+molecules.  Statistical noise on any global observable scales as
+$1/\sqrt{N_{\rm sim}}$, while the *physics* (the Parsons-Lee
+correction in particular) is set by the **physical** packing
+fraction $\eta = (\pi/4)\rho_{\rm phys} L^2$.  In the smectic
+tests we pick $\eta_{\rm target}$ for physics; on the original
+$N_{\rm sim} = N_{\rm phys}$ convention this fixes the sample
+count at
+$$
+N_{\rm phys} = (4/\pi)\,\eta_{\rm target}\,n_{\rm layers}^2,
+$$
+which is small ($\sim 1.6 \times 10^3$ at $\eta=0.5$,
+$n_{\rm layers}=50$) and gives a noisy global noise floor of
+$\sim 2.5\%$.
+
+The standard DSMC remedy is a **per-particle weight**
+$F_N = N_{\rm phys}/N_{\rm sim}$: each simulator particle
+represents $F_N$ physical particles, so the *physical* density
+consumed by the Enskog kernel is
+$$
+\rho_{\rm phys}^{\rm cell} = F_N \cdot \frac{n_{\rm sim}^{\rm cell}}{V_{\rm cell}}
+$$
+regardless of how $N_{\rm sim}$ is chosen.  Setting $F_N < 1$
+oversamples (drives noise down at fixed physics); $F_N = 1$ is
+the original behaviour.
+
+**Wiring.**  A new key `info["particle_weight"]` (default `1.0`)
+threads through `CFMZNeedleDSMC`, the Enskog kernel, and the VTK
+exporter.  In `collision_enskog_inhomo.py` the only change is the
+density used to compute $\eta_{\rm cell}$:
+
+```python
+rho_local = self.particle_weight * n_local / cell_volume
+eta_local = 0.25 * np.pi * rho_local * L * L
+```
+
+The Nanbu/NTC sampling itself (candidate count, $\nu_{\max}$
+update, acceptance ratio) stays a function of $n_{\rm sim}$, so
+the collision frequency *per simulator particle* is unchanged —
+only the density-dependent Parsons-Lee multiplier sees the
+rescaled physical density.
+
+**Worked example.**  $\eta = 0.5$, $n_{\rm layers} = 50$ →
+$N_{\rm phys} \approx 1592$.  Running on 4 ranks at 2.5 M
+particles per rank gives $N_{\rm sim} = 10^7$ and
+$F_N \approx 1.59 \times 10^{-4}$.  The smectic global noise
+floor drops from $1/\sqrt{1592} \approx 2.5\%$ to
+$1/\sqrt{10^7} \approx 0.03\%$.  Per-cell counts in the VTK
+output rise from $\sim 25$ to $\sim 10^4$, removing the
+speckly-density appearance.
+
+**F_N-invariant observables.**  $R_2$, $R_4$, $\psi_S(\mathbf{k})$,
+temperature and the per-cell intensive averages
+(`mean_velocity`, `mean_orientation`, `local_R2`, the smectic
+projections) are all averages of intensive quantities over the
+sample; they are F_N-independent.  Only `density` and `cell_eta`
+in the VTK output are extensive and pick up the F_N factor.
+
+**Activation in the tests.**  In `test_needle_smectic_2d.py` and
+`test_needle_smectic_2d_sweep.py`, $N_{\rm sim}$ is now read from
+the PETSc `-nlocal` option (per rank) and falls back to the
+old $\eta$-derived count when omitted, so default behaviour is
+unchanged.  Pass `-nlocal 2500000` on 4 ranks to recover the
+worked example above.
+
+**Recommended rank count.**  This change does not lift the
+$\le 4$-rank Enskog recommendation (§14.6) — the cross-rank halo
+exchange is still missing, and the pair-loss estimate at >4
+ranks (now printed quantitatively at construction time) still
+applies.  For $\sim 10^7$-particle runs, prefer 4 ranks at 2.5 M
+particles each over 10 ranks at 1 M.
+
+### 14.12 ParaView-only 2-D observables and the angular-fan smectic diagnostic
+
+This subsection records three changes to the smectic-test machinery
+that together let the user *observe* spontaneous Sm-A formation
+without re-introducing a strong directional IC seed:
+
+#### Visualisation grid `vis_bins`
+
+The Enskog cell-sizing constraint requires `dx ≥ L` (rod length) so
+neighbour-cell pair sampling reaches all contacts.  But a smectic
+layer also has period $\lambda = L$, so the kernel mesh aliases the
+density wave (Nyquist requires $dx \le L/2$).  The two requirements
+are mutually exclusive on the same grid.
+
+`export_cell_fields_vtk` accepts a `vis_bins` kwarg that overrides
+the spatial bin count *for the VTK output only*.  The Enskog kernel
+keeps using `self.bins`; the simulation state is unchanged.  The
+recommended setting in `test_needle_smectic_2d.py` is
+
+$$
+\text{vis\_bins} \;=\; \max(8\,n_\text{layers},\, 4\,\text{bins})
+$$
+
+so $dx_\text{vis} = L/8$ — well below Nyquist, ParaView displays
+clean stripes once Sm-A forms.
+
+#### Per-cell field set
+
+The VTK fields emitted by `export_cell_fields_vtk` are now:
+
+| Field | Description |
+|---|---|
+| `density` | $F_N \cdot n_\text{cell} / V_\text{cell}$ — the physical density |
+| `mean_velocity` | $\langle\mathbf{v}\rangle_\text{cell}$, padded to 3-D for ParaView glyphs |
+| `mean_orientation` | $(\cos\bar\theta, \sin\bar\theta, 0)$ from the per-cell Q-tensor |
+| `local_R2` | $\sqrt{\langle\cos 2\theta\rangle^2 + \langle\sin 2\theta\rangle^2}$ |
+| `local_temperature` | $m(\langle v^2\rangle - \lvert\langle v\rangle\rvert^2)$ |
+| `cell_eta` | $(\pi/4)\,\rho\,L^2$ — the Parsons-Lee argument |
+
+The `local_psi_re_<idx>` / `local_psi_im_<idx>` fields emitted by
+earlier versions have been **dropped**.  They projected the per-cell
+quantity $\langle\cos(2\theta)\,e^{i\mathbf{k}\cdot\mathbf{x}}\rangle_\text{cell}$
+at registered wavevectors $\mathbf{k}$, but the Nyquist argument
+applies just as much there as to `density`: integrating $\cos(\mathbf{k}\cdot\mathbf{x})$
+over a cell wider than the layer wavelength averages the wave to
+zero.  The authoritative smectic-A diagnostic is the *global*
+$\psi_S(\mathbf{k}) = \lvert\langle e^{i\mathbf{k}\cdot\mathbf{x}}\rangle\rvert$
+in the `smectic_abs_<idx>` history series — computed without per-cell
+binning, immune to the aliasing problem.
+
+#### Removal of the per-step 2-D heatmaps
+
+The legacy matplotlib function `plot_cfmz_observables` (and the
+`self.plot_observables` binding on `CFMZNeedleDSMC`) has been removed
+from `dsmc/plot.py` and `dsmc/cfmz/__init__.py`.  Per-step 2-D
+heatmaps of $\rho(x,y)$, $\lvert\mathbf{u}(x,y)\rvert$, $T(x,y)$,
+$S(x,y)$ are no longer emitted as `.pdf/.png` files for the
+inhomogeneous solver; the same content is served from the VTK
+output (read in ParaView).  The 1-D time-series plots
+(`plot_history`: $T(t)$, $E(t)$, $R_n(t)$, $\psi_S(\mathbf{k}_\text{idx})(t)$)
+are unchanged.
+
+The Boltzmann solver's separate `plot_observables` function in
+`dsmc/plot.py` is unaffected.
+
+#### Angular-fan smectic diagnostic
+
+With a near-isotropic IC (e.g. `info["initial_angle_amplitude"] = 0.01`)
+the spontaneous director angle is random.  Wavevectors registered
+only along $\hat{\mathbf{x}}$ and $\hat{\mathbf{y}}$ then miss the
+spontaneous direction, and *every* `smectic_abs_<idx>` stays at the
+$1/\sqrt{N_\text{sim}}$ noise floor even after Sm-A has formed.
+
+The fix is purely on the test side: register an angular fan covering
+$[0, \pi)$ at $n_\text{angle}$ directions and $|\text{m\_window}|$
+magnitudes around the natural mode $m = n_\text{layers}$.  The default
+in `test_needle_smectic_2d.py` is $n_\text{angle} = 12$ (15° resolution)
+× 5 magnitudes = 60 wavevectors.  The diagnostics Allreduce buffer
+grows by 2 × (60 − 10) = 100 floats per call — negligible.
+
+Tail-averaged sanity report takes the angular max per magnitude,
+which folds the fan into a single curve with one entry per $m$.  In
+the Sm-A regime exactly one $m$ rises above noise; the corresponding
+angle index reports the spontaneous director.  In a 2-D crystal,
+*two* magnitudes rise (along the natural direction and a perpendicular
+direction) — the same operational distinction documented in §14.8.
+
+#### Smectic-test parameter harmonisation
+
+Several inconsistencies between `test_needle_smectic_2d.py`,
+`test_needle_smectic_2d_sweep.py`, and §14.5 of this document were
+found during the §14.12 work and have been resolved by aligning the
+single-T test to the documented values:
+
+| Parameter | Old | New | Rationale |
+|---|---|---|---|
+| `L` | $\sqrt{20}$ | $\sqrt{12}$ | Restores $T_{NI} = 8/\pi \approx 2.55$, consistent with the docstring and the rest of the calamitic suite. |
+| `bins` | 32 | 8 | Matches §14.5 ("cell width $L_x/8 \approx 21.7 \gg L$").  Per-cell occupancy rises from $\sim 2.5$ to $\sim 40$ — the per-cell $\eta$ measurement that drives the Parsons-Lee correction is now statistically reliable. |
+| `eta_target` | 0.8 | 0.5 | Parsons-Lee active and bounded ($g_\text{PL} = 3.5$); avoids the regime within 0.05 of the $\eta_\text{cap} = 0.85$ divergence. |
+| `nsteps` | 3000 | 10000 | $t_\text{final} \approx 500$, roughly $2\times$ the thermal box-traversal time — sufficient for layer organisation. |
+
+The `eta_target = 0.5, n_layers = 50` defaults correspond to
+$N_\text{phys} \approx 1592$.  For visualisation runs the user should
+pass `-nlocal 100000` (or larger) to lower the noise floor; the
+particle-weight machinery from §14.11 keeps the Parsons-Lee $\eta$
+fixed at the target regardless of $N_\text{sim}$.
+
+### 14.13 The Sm-A failure mode of bare Enskog and the de Gennes–McMillan drive
+
+Empirical investigation of the smectic test suite produced a definitive
+**negative result**: the bare Boltzmann/Enskog kinetic kernel — even with
+the position-derived contact normal of §14.4 and the Parsons–Lee correction
+of §14.3 — **does not reproduce the Bates–Frenkel hard-rod smectic-A**, in
+either the spontaneous-formation or the metastability sense.  Three
+machinery additions were made to (a) diagnose this and (b) provide a
+working alternative path for users who want kinetic Sm-A.
+
+#### 14.13.1 Cross-section floor (`info["sin_dtheta_floor"]`)
+
+In the deep-nematic regime where the Onsager Vlasov pins $R_2 \to 1$, the
+NTC weight $S = L\,|\sin \Delta\theta|$ collapses to zero and the Enskog
+kernel is starved of collisions — the position-orientation coupling can no
+longer act because no pairs are being accepted.
+
+A new info key `sin_dtheta_floor` (default `0.0`, fully backward
+compatible) regularises the thin-rod cross-section:
+
+$$
+S = L \cdot \max\!\bigl(|\sin \Delta\theta|,\ s_\text{floor}\bigr).
+$$
+
+Physically this gives the rods an effective width $w \approx L \cdot
+s_\text{floor}$, i.e. an aspect ratio $L/w \approx 1/s_\text{floor}$.
+Onsager's thin-rod limit is recovered as $s_\text{floor} \to 0$.
+
+The change is one line in each of `dsmc/cfmz/collision_inhomo.py` (Boltzmann
+kernel) and `dsmc/cfmz/collision_enskog_inhomo.py` (Enskog kernel); the
+existing near-parallel impulse branch (`info["cutoff"]`) already routes
+accepted near-parallel pairs through the spherical-style impulse, so
+nothing else changes.
+
+The smectic tests now set `sin_dtheta_floor = sin(0.1) ≈ 0.0998` by
+default (rod aspect ratio ≈ 10).
+
+#### 14.13.2 Pre-formed smectic IC (`test = "smectic_2d"`)
+
+To distinguish *kernel preserves Sm-A but does not reach it from uniform*
+from *kernel actively destabilises Sm-A*, a new IC was added in
+`dsmc/cfmz/initial_inhomo.py`:
+
+$$
+\rho(x, y) \;=\; \bar\rho\,\bigl[1 + A\,\cos\!\bigl(k_S\,(x - x_\text{min})\bigr)\bigr],
+\qquad k_S = \frac{2\pi\, m}{L_x},
+$$
+
+with $m = $ `smectic_n_layers` (default $\mathrm{round}(L_x / L)$) and
+$A = $ `smectic_amplitude` (default 0.5).  Positions are sampled by
+rejection; orientations follow the same `cos(2θ)`-perturbed PDF as
+`uniform_perturbed_2d`, so the director is along $\hat x$ (parallel to
+$\mathbf{k}_S$ — the Sm-A geometry).  At $t=0$ the diagnostic reads
+$\psi_S(m\hat x) \approx A/2$, all other registered wavevectors at noise.
+
+The single-T smectic test exposes this via `-smectic_ic 1 -smectic_amp A`.
+
+**Empirical result.**  At $T = 2.0$, $\eta = 0.7$, thermostatted, $10^6$
+particles, $10^4$ steps with the cross-section floor active and the
+Onsager Vlasov on, the IC seed $\psi_S = 0.25$ **decays exponentially to
+the $1/\sqrt{N}$ noise floor by $t \approx 30$**, while $R_2$ is still
+rising past 0.5.  This is faster than the nematic forms.  Conclusion: in
+the bare Enskog framework Sm-A is not even *metastable* — it is actively
+washed out by free streaming, because nothing in the kernel feeds back
+from local density fluctuations into a positional drift.
+
+#### 14.13.3 The de Gennes–McMillan smectic Vlasov drive
+
+To recover Sm-A in the kinetic framework, one must add a smectic-coupled
+soft potential — the kinetic translation of the de Gennes–McMillan
+free-energy term $F_\text{dGM} \propto -\gamma\,|\psi|^2 S^2$, where
+$\psi$ is the smectic order parameter and $S$ the nematic order parameter.
+
+The per-particle potential, with the director fixed along $\hat x$:
+
+$$
+V_\text{sm}(\mathbf{x}, \theta) \;=\; -\,c\,\cos(2\theta)\,\cos(k_S\,x_0),
+\qquad k_S = \frac{2\pi\,n_\text{layers}}{L_x} = \frac{2\pi}{L},
+$$
+
+with `c = smectic_coupling` the dimensionless prefactor.  Differentiating
+gives a translational force and an additive angular torque:
+
+$$
+\mathbf{F}_\text{sm}(\mathbf{x}, \theta)
+= -\,c\,k_S\,\cos(2\theta)\,\sin(k_S\,x_0)\,\hat x,
+\qquad
+\tau_\text{sm}(\mathbf{x}, \theta) = -\,2c\,\cos(k_S\,x_0)\,\sin(2\theta).
+$$
+
+**Reading the factors.**  $\cos(2\theta)$ gates the force by alignment:
+aligned rods (along $\hat x$) feel the layer potential strongly,
+perpendicular rods are immune, and an isotropic ensemble sees zero net
+force — the drive automatically switches off when there is no nematic.
+$\cos(k_S\, x_0)$ in $\tau_\text{sm}$ couples nematic-aligning torque to
+density antinodes (positive at the layers, negative between them); this
+is the microscopic counterpart of the $|\psi|^2 S^2$ free-energy
+coupling.
+
+**Wiring.**  The translational force slot was already present in
+`CFMZNeedleDSMC.__init__` and `vlasov_kick_step` (`transport_inhomo.py`);
+no module code was modified.  The drive is built in-test, mirroring the
+`_onsager_vlasov_inhomo` factory pattern, in both
+`tests/cfmz/test_needle_smectic_2d.py` and the sweep
+`test_needle_smectic_2d_sweep.py`.  When both Onsager and smectic drives
+are on, the angular torques compose additively; the smectic translational
+force runs alone (Onsager has no positional component because it
+allreduces the global $\theta$-density).
+
+**Director assumption (v1).**  The drive fixes $\hat n_\text{dir} = \hat x$
+to keep the smectic potential commensurate with the periodic box.  A
+dynamic $\theta_\text{dir} = \tfrac{1}{2}\arg\langle e^{2i\theta}\rangle$
+version is left as a v2 follow-up; for that case the cosine wave's argument
+$k_S\,\mathbf{x}\cdot\hat n_\text{dir}$ is generically incommensurate with
+$L_x$ along arbitrary directions, requiring either a multi-mode potential
+or a per-particle nearest-image projection.  The cos(2θ) IC perturbation in
+both smectic tests biases the director along $\hat x$ from the start, so
+the v1 assumption is consistent with the test setup.
+
+#### 14.13.4 New CLI flags on the smectic tests
+
+Both `test_needle_smectic_2d.py` and `test_needle_smectic_2d_sweep.py`
+expose:
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `-smectic_drive 0\|1` | `0` | Enable / disable the de Gennes–McMillan Vlasov drive. |
+| `-smectic_coupling C` | `1.0` | Dimensionless prefactor $c$ in $V_\text{sm}$. |
+
+In addition the single-T test exposes:
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `-smectic_ic 0\|1` | `0` | Replace the `uniform_perturbed_2d` IC with the pre-formed `smectic_2d` IC of §14.13.2 — used for stability testing. |
+| `-smectic_amp A` | `0.5` | Density-wave amplitude $A$ of that IC; $\psi_S(t=0) \approx A/2$. |
+
+Default behaviour (all flags zero) reproduces the pre-§14.13 test code
+path bit-for-bit.
+
+#### 14.13.5 Operational protocol
+
+To investigate Sm-A in the kinetic framework:
+
+1. **Confirm the bare-kernel failure** (already known; reproduce only if
+   you mistrust the recipe):
+   ```bash
+   mpirun -n 1 python tests/cfmz/test_needle_smectic_2d.py \
+       -nlocal 1000000 -nsteps 10000 \
+       -T_bath 2.0 -nu_bath 16 -eta 0.7 \
+       -smectic_ic 1 -smectic_amp 0.5
+   ```
+   $\psi_S$ should decay to noise within $t \sim 30$.
+
+2. **Check Sm-A stability with the drive on**:
+   ```bash
+   ... -smectic_ic 1 -smectic_drive 1 -smectic_coupling 1.0
+   ```
+   $\psi_S$ should *stay* near $A/2$ rather than decay.  Tail report
+   prints "✓ Sm-A signal" rather than the warning.
+
+3. **Check spontaneous Sm-A formation from uniform**:
+   ```bash
+   ... -smectic_drive 1 -smectic_coupling 1.0
+   ```
+   $\psi_S$ should *rise* from noise to a finite value and one $m=50$
+   wavevector should dominate while the others stay flat.
+
+4. **Sweep across the I → N → Sm-A transitions** with the same coupling:
+   ```bash
+   mpirun -n 1 python tests/cfmz/test_needle_smectic_2d_sweep.py \
+       -nlocal 1000000 -nsteps 10000 \
+       -smectic_drive 1 -smectic_coupling 1.0
+   ```
+   The phase diagram should show $\max_m \psi_S(m\hat x)$ rising below a
+   measurable $T_{NA}$ while $\max_m \psi_S(m\hat y)$ stays at noise — the
+   smectic-vs-crystal distinguishing diagnostic of §14.8.
+
+If $c = 1.0$ is poorly tuned, sweep `-smectic_coupling 0.3 / 1.0 / 3.0 /
+10.0` and pick the smallest value that gives spontaneous formation in
+step 3; that is the kinetic equivalent of the $\gamma$ parameter in the
+de Gennes–McMillan free energy and sets where $T_{NA}$ lands.

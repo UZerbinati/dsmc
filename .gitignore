@@ -1,2 +1,6 @@
 tests/boltzmann/output/
 tests/cfmz/output/
+output/
+PETScDSMC.egg-info/
+__pycache__/
+*.pyc

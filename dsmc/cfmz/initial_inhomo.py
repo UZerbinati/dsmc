@@ -32,6 +32,8 @@ def initialize_particles(self):
         _initialize_uniform(self, dim=1, perturb_angle=True)
     elif self.test == "uniform_perturbed_2d":
         _initialize_uniform(self, dim=2, perturb_angle=True)
+    elif self.test == "smectic_2d":
+        _initialize_smectic_2d(self)
     else:
         raise RuntimeError(f"[!] Unknown test: {self.test}")
 
@@ -257,6 +259,92 @@ def _initialize_uniform(self, dim, perturb_angle=False):
         angle[:] = ang
         wgt[:] = 1.0
 
+    self.swarm.restoreField("velocity")
+    self.swarm.restoreField("orientation")
+    self.swarm.restoreField("angular_velocity")
+    self.swarm.restoreField("weight")
+
+
+def _initialize_smectic_2d(self):
+    """Pre-formed smectic-A IC for stability testing.
+
+    Density modulates along x̂ as ``ρ(x) = ρ̄ (1 + A cos(k_S (x - xmin)))``
+    with ``k_S = 2π m / Lx`` and ``m = n_layers`` (default
+    ``round(Lx/L)`` so the period is one rod length).  Orientations
+    follow the ``cos(2θ)``-perturbed PDF used by ``uniform_perturbed_2d``
+    so the director sits along x̂ — i.e. parallel to the layer normal,
+    which is the Sm-A geometry.
+
+    info knobs
+    ----------
+    smectic_amplitude : float, default 0.5
+        Density-wave amplitude A.  ψ_S(k_S) starts at A/2.
+    smectic_n_layers : int, default round(Lx/L)
+        m in k_S = 2π m / Lx.
+    """
+    if self.spatial_dim != 2:
+        raise RuntimeError("[!] smectic_2d IC requires spatial_dim=2")
+
+    xmin = self.info["xmin"]
+    xmax = self.info["xmax"]
+    ymin = self.info["ymin"]
+    ymax = self.info["ymax"]
+    Lx = xmax - xmin
+    Ly = ymax - ymin
+    L_rod = self.info["length"]
+    A = float(self.info.get("smectic_amplitude", 0.5))
+    m_layers = int(self.info.get("smectic_n_layers", int(round(Lx / L_rod))))
+    k_S = 2.0 * np.pi * m_layers / Lx
+
+    self.info["norm_rho"] = 1.0
+    (xs, xe), (ys, ye) = self.dm.getRanges()
+    x_lo = self.edges_x[xs - 1] if xs > 0 else self.edges_x[0]
+    x_hi = self.edges_x[xe - 1]
+    y_lo = self.edges_y[ys - 1] if ys > 0 else self.edges_y[0]
+    y_hi = self.edges_y[ye - 1]
+    rank_extent = (x_hi - x_lo) * (y_hi - y_lo)
+    total_extent = Lx * Ly
+    n_local = max(1, int(round(self.N * rank_extent / total_extent)))
+    self.swarm.setLocalSizes(n_local, self.N)
+    self.nlocal = n_local
+
+    # Rejection-sample x with weight (1 + A cos(k_S (x - xmin))).
+    X_x = np.empty(n_local)
+    n_filled = 0
+    while n_filled < n_local:
+        n_try = max(16, int((n_local - n_filled) * 1.5))
+        x_try = self.rng.uniform(x_lo, x_hi, n_try)
+        u = self.rng.uniform(0.0, 1.0 + A, n_try)
+        weights = 1.0 + A * np.cos(k_S * (x_try - xmin))
+        accepted = x_try[u < weights]
+        n_take = min(accepted.size, n_local - n_filled)
+        X_x[n_filled : n_filled + n_take] = accepted[:n_take]
+        n_filled += n_take
+
+    X = np.zeros((n_local, self.mesh_dim))
+    X[:, 0] = X_x
+    X[:, 1] = self.rng.uniform(y_lo, y_hi, n_local)
+    self.swarm.setPointCoordinates(X)
+    self.nlocal = self.swarm.getLocalSize()
+
+    n = self.nlocal
+    vel = self.swarm.getField("velocity")
+    angle = self.swarm.getField("orientation")
+    omega = self.swarm.getField("angular_velocity")
+    wgt = self.swarm.getField("weight")
+    if n > 0:
+        if self.T_bath is not None and self.init_at_T_bath:
+            m_mass = self.info["mass"]
+            I_inertia = self.info["inertia"]
+            vel[:] = self.rng.normal(0.0, np.sqrt(self.T_bath / m_mass), (n, self.dim))
+            omega[:] = self.rng.normal(0.0, np.sqrt(self.T_bath / I_inertia), (n, 1))
+        else:
+            vel[:] = self.rng.uniform(-0.5, 0.5, (n, self.dim))
+            omega[:] = self.rng.uniform(-0.25, 0.25, (n, 1))
+        from .initial import _sample_perturbed_positions_1d
+        ang_flat = _sample_perturbed_positions_1d(self, n)
+        angle[:] = np.clip(ang_flat[:, None], 1e-12, 2 * np.pi - 1e-12)
+        wgt[:] = 1.0
     self.swarm.restoreField("velocity")
     self.swarm.restoreField("orientation")
     self.swarm.restoreField("angular_velocity")

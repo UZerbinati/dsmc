@@ -268,7 +268,11 @@ def nanbu_collision_step_enskog_inhomo(self):
 
         for cid, idxs_local in cell_lists.items():
             n_local = idxs_local.size
-            if n_local < 1:
+            # A 1-particle cell can only sample i=this-particle, j=anything-else.
+            # That's a valid pair, but the Boltzmann kernel skips it (line 125
+            # of collision_inhomo.py) and we mirror that here to keep the
+            # two kernels behaviour-comparable.
+            if n_local < 2:
                 continue
 
             # Pool: local cell + neighbours.
@@ -279,8 +283,13 @@ def nanbu_collision_step_enskog_inhomo(self):
             pool = np.concatenate(pools)
             n_pool = pool.size
 
-            # Local packing fraction & Parsons-Lee correction.
-            rho_local = n_local / cell_volume
+            # Local packing fraction & Parsons-Lee correction.  The
+            # particle-weight factor F_N = self.particle_weight rescales
+            # n_sim → n_phys, so eta_local is the *physical* packing
+            # fraction regardless of how N_sim is chosen (default F_N=1.0
+            # reproduces the per-simulator-particle density).  See
+            # CFMZ.md §14.10.
+            rho_local = self.particle_weight * n_local / cell_volume
             eta_local = 0.25 * np.pi * rho_local * L * L
             g_PL = float(_parsons_lee(eta_local))
 
@@ -315,8 +324,24 @@ def nanbu_collision_step_enskog_inhomo(self):
                     r_ij[:, 1] -= Ly * np.round(r_ij[:, 1] / Ly)
             r_norm = np.linalg.norm(r_ij[:, : self.spatial_dim], axis=1)
 
-            # Reject pairs at distance > L (outside the contact shell).
-            close = r_norm < L
+            # Reject pairs outside the contact shell ``r ∈ (r_floor, L)``.
+            # The lower floor is essential: in the parallel-cutoff
+            # ("near-parallel rods") branch below, the impulse scales
+            # like ``vn_cut · n_contact`` with ``|n_contact| = 1/r_norm``
+            # and ``vn_cut ~ |v_rel|/r_norm`` — i.e. the kick magnitude
+            # diverges like ``1/r_norm²`` as r_norm → 0.  Without the
+            # floor, the (rare) close-encounter pairs imparted huge
+            # velocities every step; combined with the periodic wrap
+            # losing precision past 2⁵³, particles ended up at "outside"
+            # positions and were silently dropped by ``swarm.migrate``,
+            # bleeding ~50 % of N per step.  ``r_floor = 1e-3·L`` is
+            # well below the typical inter-particle spacing (~1.2 in
+            # the smectic test, with L≈3.46) but bounds the kick to
+            # ``10³·|v_rel|/L``, finite and harmless.  Pairs at sub-floor
+            # separation are physically overlapping in the rod sense
+            # and contribute zero measure to the kinetic operator.
+            r_floor = 1e-3 * L
+            close = (r_norm < L) & (r_norm > r_floor)
             if not np.any(close):
                 continue
             i_part = i_part[close]
@@ -355,9 +380,18 @@ def nanbu_collision_step_enskog_inhomo(self):
 
             V = vi - vj + omegai[:, None] * ri_perp - omegaj[:, None] * rj_perp
 
-            # NTC weight.
+            # NTC weight.  ``sin_dtheta_floor`` (default 0) regularises
+            # the thin-rod cross-section so parallel pairs still
+            # collide with finite weight ≈ L·sin_dtheta_floor — i.e.
+            # rods behave as if they had a residual angular separation
+            # of arcsin(sin_dtheta_floor).  Useful when a Vlasov drive
+            # pins the system to R₂≈1 and the |sinΔθ| weight would
+            # otherwise starve the Enskog kernel of collisions.  The
+            # near-parallel impulse branch (cutoff) already routes
+            # these accepted pairs through the spherical impulse.
+            sin_floor = self.info.get("sin_dtheta_floor", 0.0)
             gn = np.abs(np.sum(V * n_contact, axis=1))
-            S = L * np.abs(np.sin(thetai - thetaj))
+            S = L * np.maximum(np.abs(np.sin(thetai - thetaj)), sin_floor)
             w = gn * S * g_PL
 
             if w.size > 0:

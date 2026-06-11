@@ -72,11 +72,22 @@ nu_bath = Opt.getReal("nu_bath", 16.0)
 nsteps = Opt.getInt("nsteps", 3000)
 seed = Opt.getInt("seed", 47)
 use_vlasov = bool(Opt.getInt("vlasov", 1))
+# de Gennes–McMillan smectic-A drive (see CFMZ.md §14.13).  Off by default;
+# enable across the entire T sweep with ``-smectic_drive 1``.  When on, each
+# T_bath run gets the same coupling c.
+smectic_drive    = bool(Opt.getInt("smectic_drive", 0))
+smectic_coupling = Opt.getReal("smectic_coupling", 1.0)
 
 L = np.sqrt(12.0)
 Lx = float(n_layers) * L
-N_total = max(int(round((4.0 / np.pi) * eta_target * n_layers ** 2)), 100)
-nlocal = max(N_total // max(1, MPI.COMM_WORLD.Get_size()), 1)
+# Physical particle count from η_target (sets the Parsons-Lee correction).
+N_phys = max(int(round((4.0 / np.pi) * eta_target * n_layers ** 2)), 100)
+size = max(1, MPI.COMM_WORLD.Get_size())
+# -nlocal overrides the η-derived count so statistics scale independently
+# of physics; defaults to N_phys // size (original behaviour).
+nlocal = max(Opt.getInt("nlocal", max(N_phys // size, 100)), 1)
+N_sim_total = nlocal * size
+particle_weight = float(N_phys) / float(max(N_sim_total, 1))
 
 
 def _onsager_vlasov_inhomo(L_rod, bins_theta, comm):
@@ -116,6 +127,36 @@ def _onsager_vlasov_inhomo(L_rod, bins_theta, comm):
     return vlasov_force, interaction_energy
 
 
+def _smectic_drive_inhomo(L_rod, c_coupling, n_layers_, Lx_):
+    """de Gennes–McMillan smectic-A drive, director fixed along x̂.
+
+    Mirrors the closure in ``test_needle_smectic_2d.py``.  Returns
+    ``(translational_force, smectic_torque)`` callables that match the
+    ``(angle, X, density)`` interface of ``vlasov_kick_step``.  The
+    sweep relies on the cos(2θ) IC pinning the director along x̂; the
+    drive is therefore expressed in that fixed frame so the smectic
+    potential is commensurate with the periodic box.  See CFMZ.md
+    §14.13 for the physics.
+    """
+    k_S = 2.0 * np.pi * n_layers_ / Lx_
+
+    def translational_force(angle, X, density):
+        x0 = X[:, 0]
+        th = angle.ravel()
+        amp = -c_coupling * k_S * np.cos(2.0 * th) * np.sin(k_S * x0)
+        out = np.zeros((th.size, 2))
+        out[:, 0] = amp
+        return out
+
+    def smectic_torque(angle, X, density):
+        x0 = X[:, 0]
+        th = angle.ravel()
+        torque = -2.0 * c_coupling * np.cos(k_S * x0) * np.sin(2.0 * th)
+        return torque[:, None]
+
+    return translational_force, smectic_torque
+
+
 # Wavevector fan: 5 around the natural smectic mode along x̂ and ŷ.
 k0 = 2.0 * np.pi / Lx
 m_centre = n_layers
@@ -144,6 +185,12 @@ info_template = {
     "initial_angle_amplitude": 0.1,
     "initial_angle_shift": 0.0,
     "initial_angle_wavelength": 2,
+    # Decouple sim sample count from physical density (CFMZ.md §14.10).
+    "particle_weight": particle_weight,
+    # Cross-section floor (CFMZ.md §14.13): keeps the Enskog kernel
+    # collisional even when the Onsager Vlasov pins R₂ → 1 in deep
+    # nematic regions of the sweep.
+    "sin_dtheta_floor": float(np.sin(0.1)),
 }
 
 comm = MPI.COMM_WORLD
@@ -153,9 +200,12 @@ comm.Barrier()
 
 Print("Running needle 2-D smectic phase-diagram sweep (Onsager + Enskog):")
 Print(f"  L={L:.4f},  Lx={Lx:.2f}  ({n_layers} rod-lengths across)")
-Print(f"  η_target={eta_target},  nlocal_total≈{N_total},  nlocal/rank={nlocal}")
+Print(f"  η_target={eta_target},  N_phys={N_phys},  N_sim={N_sim_total} "
+      f"(nlocal/rank={nlocal}, F_N={particle_weight:.3e})")
 Print(f"  T_NI (Onsager spinodal) ≈ {8 / np.pi:.3f},  T_bath sweep = {T_bath_values}")
 Print(f"  vlasov={'ON' if use_vlasov else 'OFF (pure Enskog)'}")
+Print(f"  smectic_drive={'ON' if smectic_drive else 'OFF'}"
+      f"{f' (c={smectic_coupling}, k_S=2π/L)' if smectic_drive else ''}")
 
 R2_curve = []
 psi_x_max = []
@@ -184,11 +234,31 @@ if __name__ == "__main__":
             "prefix": f"{output_root}/T_{T_b:.2f}",
         }
         if use_vlasov:
-            vf, ie = _onsager_vlasov_inhomo(L_rod=L, bins_theta=128, comm=comm)
+            onsager_vf, ie = _onsager_vlasov_inhomo(L_rod=L, bins_theta=128, comm=comm)
         else:
-            vf, ie = None, None
+            onsager_vf, ie = None, None
+
+        # de Gennes–McMillan smectic drive composes additively with Onsager.
+        if smectic_drive:
+            sm_tf, sm_torque = _smectic_drive_inhomo(
+                L_rod=L, c_coupling=smectic_coupling,
+                n_layers_=n_layers, Lx_=Lx,
+            )
+            if onsager_vf is not None:
+                def vf(angle, X, density,
+                       _o=onsager_vf, _s=sm_torque):
+                    return _o(angle, X, density) + _s(angle, X, density)
+            else:
+                vf = sm_torque
+            tf = sm_tf
+        else:
+            vf = onsager_vf
+            tf = None
+
         sim = CFMZNeedleDSMC(opts=opts, info=info,
-                             vlasov_force=vf, interaction_energy=ie,
+                             vlasov_force=vf,
+                             translational_force=tf,
+                             interaction_energy=ie,
                              comm=comm)
         sim.run(nsteps=nsteps, monitor_every=nsteps)
         sim.export_cell_fields_vtk(
@@ -217,8 +287,8 @@ if __name__ == "__main__":
 
     if comm.Get_rank() == 0:
         Print("\nSweep complete — writing phase diagram.")
-        N_global = nlocal * comm.Get_size()
-        noise_floor = 1.0 / np.sqrt(N_global)
+        # Noise on global ψ_S scales as 1/√N_sim (sample count), not N_phys.
+        noise_floor = 1.0 / np.sqrt(N_sim_total)
         fig, ax, _ = fig_axes()
         ax.plot(T_bath_values, R2_curve, "o-", color="C0", linewidth=1.5,
                 label=r"$R_2$ (nematic)")

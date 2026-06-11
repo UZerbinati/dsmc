@@ -62,8 +62,13 @@ def _nanbu_pair_kernel(self, idxs, vel, theta, omega):
     V = vi - vj + omegai[:, None] * ri_perp - omegaj[:, None] * rj_perp
 
     if cross_section == "hard_needle":
+        # ``sin_dtheta_floor`` (default 0): regularises the thin-rod
+        # cross-section so parallel rods still collide with weight
+        # ≈ L·sin_dtheta_floor.  See collision_enskog_inhomo.py for
+        # the rationale (Vlasov-pinned R₂≈1 case).
+        sin_floor = self.info.get("sin_dtheta_floor", 0.0)
         gn = np.abs(np.sum(V * n, axis=1))
-        S = L * np.abs(np.sin(thetai - thetaj))
+        S = L * np.maximum(np.abs(np.sin(thetai - thetaj)), sin_floor)
         w = gn * S
         w_max = float(w.max()) if w.size > 0 else 0.0
         if w_max > self._nu_max:
