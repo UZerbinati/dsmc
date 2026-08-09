@@ -23,6 +23,19 @@ def plot_history(self, prefix=""):
     to_plot = []
     if "temperature" in self.history:
         to_plot.append((self.history["temperature"], r"$T$", "_temperature"))
+    if "temperature_trans" in self.history and "temperature_rot" in self.history:
+        fig, ax, _ = fig_axes()
+        ax.plot(time, np.array(self.history["temperature_trans"]),
+                color="black", linewidth=1.5, label=r"$T_{\mathrm{tr}}$")
+        ax.plot(time, np.array(self.history["temperature_rot"]),
+                color="red", linewidth=1.5, linestyle="--", label=r"$T_{\mathrm{rot}}$")
+        ax.set_xlabel(r"$t$")
+        ax.set_ylabel(r"Temperature")
+        ax.legend()
+        ax.tick_params(which="both", direction="in", top=True, right=True)
+        fig.savefig(f"{prefix}_temperature_split.pdf")
+        fig.savefig(f"{prefix}_temperature_split.png", dpi=400)
+        plt.close(fig)
     if "energy" in self.history:
         to_plot.append((self.history["energy"], r"$E_{\mathrm{kin}}$", "_energy"))
     if "interaction_energy" in self.history:

@@ -169,6 +169,8 @@ class CFMZNeedleDSMCHomo:
         self.history = {
             "step": [],
             "temperature": [],
+            "temperature_trans": [],
+            "temperature_rot": [],
             "energy": [],
             "momentum_1": [],
             "momentum_2": [],
@@ -338,12 +340,17 @@ class CFMZNeedleDSMCHomo:
         mean_u   = global_mom    / global_n
         mean_eta = global_ang_mom / global_n
         temp = (2.0 / (self.dim + 1)) * global_energy / global_n
+        # Equipartition split: dim translational dof, one rotational dof.
+        temp_trans = (2.0 / self.dim) * (global_energy - global_energy_rot) / global_n
+        temp_rot   = 2.0 * global_energy_rot / global_n
 
         R = {n: float(np.abs(z / global_n)) for n, z in global_z_sums.items()}
         legacy_R = R[legacy_n]
 
         self.history["step"].append(step)
         self.history["temperature"].append(temp)
+        self.history["temperature_trans"].append(temp_trans)
+        self.history["temperature_rot"].append(temp_rot)
         self.history["energy"].append(global_energy / global_n)
         if self.interaction_energy is not None:
             E_int = self.interaction_energy(angle)
