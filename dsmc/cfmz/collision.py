@@ -74,12 +74,13 @@ def nanbu_collision_step(self):
         selection only).  Draw the direction **n** = (cos ψ, sin ψ) and a
         one-sided angle χ ~ U(0, π), then rotate the pair vector
 
-            ( √(m/4) g·n , √(I/2) ωᵢ )
+            ( √(m/4) g·n , √(I/4) (ωᵢ - ωⱼ) )
 
         counterclockwise by χ, leaving the tangential relative velocity,
-        ωⱼ, and the orientations unchanged.  The rotation happens on the
-        pair energy shell, so momentum and energy are conserved exactly
-        (the mean spin is not, and decays to zero).  Undoing a collision
+        the mean spin ωᵢ + ωⱼ, and the orientations unchanged.  The
+        rotation happens on the pair energy shell, so momentum, total
+        spin — and hence the generalised angular momentum of a local
+        collision — and energy are conserved exactly.  Undoing a collision
         would need χ ∈ (π, 2π), outside the support, so detailed balance
         fails pointwise; the maps are measure-preserving bijections
         applied at the constant Maxwell rate, so the reciprocity
@@ -142,24 +143,28 @@ def nanbu_collision_step(self):
     if collision_rule == "chiral":
         m = self.info["mass"]
         I = self.info["inertia"]
-        sa = np.sqrt(0.25 * m)   # scale of g·n in the pair energy
-        sb = np.sqrt(0.5 * I)    # scale of ω_i in the pair energy
+        sa = np.sqrt(0.25 * m)   # scale of g·n     in the pair energy
+        sb = np.sqrt(0.25 * I)   # scale of ωᵢ - ωⱼ in the pair energy
         gn = np.sum((vi - vj) * n, axis=1)
+        s  = omegai - omegaj
         a  = sa * gn
-        b  = sb * omegai
+        b  = sb * s
         # one-sided angle: χ ∈ (0, π) breaks detailed balance, the maps
         # stay measure-preserving so reciprocity holds exactly
         chi   = np.pi * self.rng.random(Mcol)
         a_new = np.cos(chi) * a - np.sin(chi) * b
         b_new = np.sin(chi) * a + np.cos(chi) * b
         dgn   = (a_new - a) / sa
+        ds    = (b_new - b) / sb
         vi += 0.5 * dgn[:, None] * n
         vj -= 0.5 * dgn[:, None] * n
-        omegai = b_new / sb
+        omegai = omegai + 0.5 * ds
+        omegaj = omegaj - 0.5 * ds
 
         vel[i]   = vi
         vel[j]   = vj
         omega[i] = omegai
+        omega[j] = omegaj
 
         self.swarm.restoreField("velocity")
         self.swarm.restoreField("orientation")
